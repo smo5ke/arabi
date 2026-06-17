@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Rust](https://img.shields.io/badge/Rust-1.70+-orange.svg)](https://www.rust-lang.org)
-[![Tests](https://img.shields.io/badge/tests-129%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-136%20passed-brightgreen.svg)]()
 
 لغة برمجة عربية كاملة ببنية Python-like و اداء C++-competitive.
 
@@ -13,6 +13,8 @@
 - **اداء عالي**: VM مبني بـ Rust مع تحسينات متقدمة
 - **170+ دالة مدمجة**: رياضيات، نصوص، وقت، عشوائي، ملفات، JSON، نظام
 - **نظام اصناف كامل**: وراثة، طرق، magic methods، decorators
+- **مطابقة الانماط**: `طابق`/`حالة` مع دعم القيم والنصوص
+- **وصول ديناميكي**: `خاصية()`، `تعيين_خاصية()`، `هل_خاصية()`
 - **التغليف (Closures)**: دوال داخلية مع `محلي` و `عام`
 - **معالجة اخطاء**: `حاول`/`خلل`/`اخيرا` مع استثناءات مخصصة وارقام اسطر
 - **مدير سياق**: `باستخدام` مع `__ادخل__`/`__اترك__`
@@ -27,7 +29,7 @@
 ## التثبيت
 
 ```bash
-git clone https://github.com/arabi-lang/arabi.git
+git clone https://github.com/smo5ke/arabi.git
 cd arabi
 cargo build --release
 ```
@@ -199,22 +201,25 @@ arabi
 
 ## الاداء
 
-متوسط الاداء: **2.27x اسرع** من Python (15/15 اختبارات — 14 فوز، 1 تعادل)
+متوسط الاداء: **2.44x اسرع** من Python (15 اختبار — 13 فوز، 2 خسارة)
 
 | الاختبار | عربي | Python | النسبة |
 |---------|------|--------|--------|
-| Arithmetic (10M) | ~0.11s | ~0.11s | **تعادل** |
-| Strings (100K concat) | ~0.007s | ~0.063s | **~9x اسرع** |
-| Lists (100K append) | ~0.004s | ~0.010s | **~2.5x اسرع** |
-| Nested Loops (1M) | ~0.045s | ~0.135s | **~3x اسرع** |
-| Fibonacci (recursive 35) | ~0.003s | ~0.019s | **~6x اسرع** |
-| Closures (100K) | ~0.004s | ~0.005s | **~1.3x اسرع** |
-| Comprehension (100K) | ~0.008s | ~0.016s | **~2x اسرع** |
-| Classes (100K) | ~0.043s | ~0.032s | **0.73x** |
-| F-Strings (100K) | ~0.012s | ~0.033s | **~2.7x اسرع** |
-| Exceptions (100K) | ~0.014s | ~0.035s | **~2.5x اسرع** |
-| Math (sin/cos 1M) | ~0.018s | ~0.027s | **~1.5x اسرع** |
-| Dicts (100K) | ~0.004s | ~0.016s | **~4x اسرع** |
+| Arithmetic (10M) | 58.3ms | 75.9ms | **1.30x اسرع** |
+| Strings (100K concat) | 9.8ms | 93.5ms | **9.58x اسرع** |
+| Lists (100K append) | 9.9ms | 23.4ms | **2.37x اسرع** |
+| Nested Loops (1M) | 9.9ms | 30.2ms | **3.04x اسرع** |
+| Fibonacci (recursive 35) | 51.7ms | 70.0ms | **1.35x اسرع** |
+| Closures (100K) | 15.2ms | 24.2ms | **1.59x اسرع** |
+| Comprehension (100K) | 14.7ms | 21.3ms | **1.45x اسرع** |
+| Classes (100K) | 26.7ms | 29.8ms | **1.12x اسرع** |
+| F-Strings (100K) | 17.8ms | 24.1ms | **1.36x اسرع** |
+| Exceptions (100K) | 9.0ms | 21.2ms | **2.36x اسرع** |
+| Math (sin/cos 1M) | 21.1ms | 33.8ms | **1.60x اسرع** |
+| Dicts (100K) | 10.3ms | 37.9ms | **3.68x اسرع** |
+| Factorial Recursion | 44.6ms | 43.3ms | 0.97x |
+| Bubble Sort | 10.2ms | 40.0ms | **3.91x اسرع** |
+| String Processing | 25.3ms | 22.8ms | 0.90x |
 
 ### تحسينات الاداء المطبقة
 
@@ -230,6 +235,7 @@ arabi
 | **Inline Fields** | تخزين حتى 4 حقول داخل الكائن |
 | **mimalloc** | خاضع الذاكرة عالي الاداء |
 | **Instance-first Fast Path** | مسار سريع لانشاء الكائنات |
+| **Stability Hardening** | 0 unwrap() خطرة في كود الانتاج |
 
 ## البنية التقنية
 
@@ -242,7 +248,7 @@ arabi
 | JIT | Cranelift-based integer JIT | ~617 |
 | Builtins | 170+ دالة مدمجة | ~2400 |
 | CLI | REPL + Package manager + Colored output | ~315 |
-| Tests | 129 integration tests + stability test | |
+| Tests | 136 integration tests | |
 
 ## امتداد الملف
 

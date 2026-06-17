@@ -34,46 +34,6 @@ pub struct VM {
 
 use std::sync::LazyLock;
 
-// Macro to create a builtin module (Class with static methods)
-#[allow(unused)]
-macro_rules! make_builtin_module {
-    ($name:expr, $($method_name:expr => $fn_name:expr),* $(,)?) => {{
-        let mut methods = HashMap::new();
-        $(methods.insert($method_name.to_string(), Value::NativeFunction(Rc::new(NativeFunctionData {
-            name: $fn_name.to_string(), arity: 0,
-        })));)*
-        Value::Class(Rc::new(ClassData {
-            name: Rc::from($name),
-            methods: Rc::new(methods),
-            fields: HashMap::new(),
-            parents: Vec::new(),
-            field_names: Vec::new(),
-            field_index: Rc::new(HashMap::new()),
-        }))
-    }};
-}
-
-// Same as above but with fields (for modules that have constants like math.PI)
-#[allow(unused)]
-macro_rules! make_builtin_module_with_fields {
-    ($name:expr, {$($field_name:expr => $field_val:expr),* $(,)?}, $($method_name:expr => $fn_name:expr),* $(,)?) => {{
-        let mut methods = HashMap::new();
-        $(methods.insert($method_name.to_string(), Value::NativeFunction(Rc::new(NativeFunctionData {
-            name: $fn_name.to_string(), arity: 0,
-        })));)*
-        let mut fields = HashMap::new();
-        $(fields.insert($field_name.to_string(), $field_val);)*
-        Value::Class(Rc::new(ClassData {
-            name: Rc::from($name),
-            methods: Rc::new(methods),
-            fields,
-            parents: Vec::new(),
-            field_names: Vec::new(),
-            field_index: Rc::new(HashMap::new()),
-        }))
-    }};
-}
-
 static BUILTIN_NAMES: LazyLock<std::collections::HashSet<&'static str>> = LazyLock::new(|| {
     [
         "اطبع", "ادخل", "طول", "مصفوفة", "مترابطة", "صحيح", "عشري", "منطق", "نص",
@@ -549,38 +509,6 @@ impl VM {
                 }
                 let err_line = if ip > 0 { module.lines.get(ip - 1).copied().unwrap_or(0) as usize } else { 0 };
                 return Err(RuntimeError::new_typed($class, $msg).with_line(err_line));
-            }};
-        }
-
-        // Macro for binary arithmetic ops (SUB, MUL): INT_INT, FLOAT_FLOAT + magic fallback
-        macro_rules! binary_op {
-            ($op:tt, $magic_l:expr, $magic_r:expr, $fallback:ident) => {{
-                let right = hot_pop!();
-                let left = hot_pop!();
-                match (&left, &right) {
-                    (Value::Integer(a), Value::Integer(b)) => hot_push!(Value::Integer(a $op b)),
-                    (Value::Float(a), Value::Float(b)) => hot_push!(Value::Float(a $op b)),
-                    _ => {
-                        let mut found = false;
-                        if let Value::Instance(rc) = &left {
-                            if let Some(method) = rc.class.methods.get($magic_l) {
-                                if let Ok(result) = method.call(&[left.clone(), right.clone()], &[], self, module) {
-                                    hot_push!(result); found = true;
-                                }
-                            }
-                        }
-                        if !found {
-                            if let Value::Instance(rc) = &right {
-                                if let Some(method) = rc.class.methods.get($magic_r) {
-                                    if let Ok(result) = method.call(&[right.clone(), left.clone()], &[], self, module) {
-                                        hot_push!(result); found = true;
-                                    }
-                                }
-                            }
-                        }
-                        if !found { match self.$fallback(left, right) { Ok(v) => hot_push!(v), Err(e) => { runtime_error!(e.class_name(), e.to_string()); } } }
-                    }
-                }
             }};
         }
 
@@ -1190,8 +1118,80 @@ impl VM {
                         }
                     }
                 }
-                OP_BINARY_SUBTRACT => { binary_op!(-, "__طرح__", "__طرح_ع__", sub); }
-                OP_BINARY_MULTIPLY => { binary_op!(*, "__ضرب__", "__ضرب_ع__", mul); }
+                OP_BINARY_SUBTRACT => {
+                    let right = hot_pop!();
+                    let left = hot_pop!();
+                    match (&left, &right) {
+                        (Value::Integer(a), Value::Integer(b)) => hot_push!(Value::Integer(a - b)),
+                        (Value::Float(a), Value::Float(b)) => hot_push!(Value::Float(a - b)),
+                        (Value::Integer(a), Value::Float(b)) => hot_push!(Value::Float(*a as f64 - b)),
+                        (Value::Float(a), Value::Integer(b)) => hot_push!(Value::Float(a - *b as f64)),
+                        _ => {
+                            let mut found = false;
+                            if let Value::Instance(rc) = &left {
+                                if let Some(method) = rc.class.methods.get("__طرح__") {
+                                    if let Ok(result) = method.call(&[left.clone(), right.clone()], &[], self, module) {
+                                        hot_push!(result); found = true;
+                                    }
+                                }
+                            }
+                            if !found {
+                                if let Value::Instance(rc) = &right {
+                                    if let Some(method) = rc.class.methods.get("__طرح_ع__") {
+                                        if let Ok(result) = method.call(&[right.clone(), left.clone()], &[], self, module) {
+                                            hot_push!(result); found = true;
+                                        }
+                                    }
+                                }
+                            }
+                            if !found { match self.sub(left, right) { Ok(v) => hot_push!(v), Err(e) => { runtime_error!(e.class_name(), e.to_string()); } } }
+                        }
+                    }
+                }
+                OP_BINARY_MULTIPLY => {
+                    let right = hot_pop!();
+                    let left = hot_pop!();
+                    match (&left, &right) {
+                        (Value::Integer(a), Value::Integer(b)) => hot_push!(Value::Integer(a * b)),
+                        (Value::Float(a), Value::Float(b)) => hot_push!(Value::Float(a * b)),
+                        (Value::Integer(a), Value::Float(b)) => hot_push!(Value::Float(*a as f64 * b)),
+                        (Value::Float(a), Value::Integer(b)) => hot_push!(Value::Float(a * *b as f64)),
+                        (Value::String(s), Value::Integer(n)) if *n >= 0 => {
+                            let rep = *n as usize;
+                            let total_len = s.len().saturating_mul(rep);
+                            let mut result = String::with_capacity(total_len);
+                            for _ in 0..rep { result.push_str(s); }
+                            hot_push!(Value::String(Rc::new(result)));
+                        }
+                        (Value::Integer(n), Value::String(s)) if *n >= 0 => {
+                            let rep = *n as usize;
+                            let total_len = s.len().saturating_mul(rep);
+                            let mut result = String::with_capacity(total_len);
+                            for _ in 0..rep { result.push_str(s); }
+                            hot_push!(Value::String(Rc::new(result)));
+                        }
+                        _ => {
+                            let mut found = false;
+                            if let Value::Instance(rc) = &left {
+                                if let Some(method) = rc.class.methods.get("__ضرب__") {
+                                    if let Ok(result) = method.call(&[left.clone(), right.clone()], &[], self, module) {
+                                        hot_push!(result); found = true;
+                                    }
+                                }
+                            }
+                            if !found {
+                                if let Value::Instance(rc) = &right {
+                                    if let Some(method) = rc.class.methods.get("__ضرب_ع__") {
+                                        if let Ok(result) = method.call(&[right.clone(), left.clone()], &[], self, module) {
+                                            hot_push!(result); found = true;
+                                        }
+                                    }
+                                }
+                            }
+                            if !found { match self.mul(left, right) { Ok(v) => hot_push!(v), Err(e) => { runtime_error!(e.class_name(), e.to_string()); } } }
+                        }
+                    }
+                }
                 OP_BINARY_DIVIDE => { binary_div_op!("__قسمة__", "__قسمة_ع__", div); }
                 OP_BINARY_FLOOR_DIVIDE => { binary_floor_div_op!("__ضرب_القسمة__", "__ضرب_القسمة_ع__", floor_div); }
                 OP_BINARY_POWER => { binary_power_op!("__قوة__", "__قوة_ع__", pow); }
