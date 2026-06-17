@@ -97,6 +97,11 @@ pub enum Keyword {
 
     // Decorator
     Decorator,
+
+    // Match/Case
+    Match,
+    Case,
+    CaseDefault,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

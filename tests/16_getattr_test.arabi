@@ -1,0 +1,29 @@
+# Test getattr/setattr with a real class
+صنف نقطة:
+  دالة __تهيئة__(هذا، ص، خ):
+    هذا.ص = ص
+    هذا.خ = خ
+
+ن = نقطة(3، 4)
+
+# Test direct access
+اطبع(ن.ص)
+اطبع(ن.خ)
+
+# Test set attribute
+ن.ص = 10
+ن.خ = 20
+اطبع(ن.ص)
+اطبع(ن.خ)
+
+# Test getattr builtin
+اطبع(خاصية(ن، "ص"))
+اطبع(خاصية(ن، "خ"))
+
+# Test setattribute builtin
+تعيين_خاصية(ن، "س"، 30)
+اطبع(خاصية(ن، "س"))
+
+# Test hasattr builtin
+اطبع(هل_خاصية(ن، "ص"))
+اطبع(هل_خاصية(ن، "لا_موجود"))

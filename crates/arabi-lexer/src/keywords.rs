@@ -71,6 +71,11 @@ impl KeywordMap {
         // Decorators
         map.insert("زخرف", Keyword::Decorator);
 
+        // Match/Case
+        map.insert("طابق", Keyword::Match);
+        map.insert("حالة", Keyword::Case);
+        map.insert("حالة_اخرى", Keyword::CaseDefault);
+
         KeywordMap { map }
     }
 

@@ -2995,6 +2995,43 @@ pub fn call_native(name: &str, args: &[Value], kwargs: &[(String, Value)], vm: &
                 _ => Err(RuntimeError::new_typed("استثناء_نوع", "نمط_جميع يتطلب نمطين")),
             }
         }
+        "خاصية" => {
+            let obj = args.first().ok_or_else(|| RuntimeError::new("خاصية تتطلب كائناً"))?;
+            let name = args.get(1).ok_or_else(|| RuntimeError::new("خاصية تتطلب اسم خاصية"))?;
+            let name_str = match name {
+                Value::String(s) => s.to_string(),
+                _ => return Err(RuntimeError::new_typed("استثناء_نوع", "اسم الخاصية يجب ان يكون نصاً")),
+            };
+            match obj.get_attribute(&name_str) {
+                Some(val) => Ok(val),
+                None => Err(RuntimeError::new_typed("استثناء_اسم", format!("خاصية غير موجودة: {}", name_str))),
+            }
+        }
+        "تعيين_خاصية" => {
+            let obj = args.first().ok_or_else(|| RuntimeError::new("تعيين_خاصية تتطلب كائناً"))?;
+            let name = args.get(1).ok_or_else(|| RuntimeError::new("تعيين_خاصية تتطلب اسم خاصية"))?;
+            let value = args.get(2).ok_or_else(|| RuntimeError::new("تعيين_خاصية تتطلب قيمة"))?;
+            let name_str = match name {
+                Value::String(s) => s.to_string(),
+                _ => return Err(RuntimeError::new_typed("استثناء_نوع", "اسم الخاصية يجب ان يكون نصاً")),
+            };
+            match obj {
+                Value::Instance(rc) => {
+                    rc.set_field(name_str, value.clone());
+                    Ok(Value::Null)
+                }
+                _ => Err(RuntimeError::new_typed("استثناء_نوع", "تعيين_خاصية تتطلب كائناً")),
+            }
+        }
+        "هل_خاصية" => {
+            let obj = args.first().ok_or_else(|| RuntimeError::new("هل_خاصية تتطلب كائناً"))?;
+            let name = args.get(1).ok_or_else(|| RuntimeError::new("هل_خاصية تتطلب اسم خاصية"))?;
+            let name_str = match name {
+                Value::String(s) => s.to_string(),
+                _ => return Err(RuntimeError::new_typed("استثناء_نوع", "اسم الخاصية يجب ان يكون نصاً")),
+            };
+            Ok(Value::Boolean(obj.get_attribute(&name_str).is_some()))
+        }
 
         _ => Err(RuntimeError::new_typed("استثناء_اسم", format!("الدالة النظامية '{}' غير موجودة", name))),
     }

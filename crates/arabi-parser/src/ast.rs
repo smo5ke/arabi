@@ -80,6 +80,11 @@ pub enum Stmt {
         target: Option<String>,
         body: Block,
     },
+    Match {
+        value: Expr,
+        cases: Vec<(Expr, Block)>,
+        default: Option<Block>,
+    },
 }
 
 #[derive(Debug, Clone)]

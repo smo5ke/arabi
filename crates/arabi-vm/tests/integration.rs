@@ -896,10 +896,10 @@ fn test_82_constants_and_special() {
 #[test]
 fn test_83_regex_module() {
     // طابق (match)
-    let r = run_arabi("استورد نمط\nن = نمط.طابق(\"^[a-z]+$\", \"hello\")").unwrap();
+    let r = run_arabi("استورد نمط\nن = نمط.تطابق(\"^[a-z]+$\", \"hello\")").unwrap();
     assert_eq!(r.globals.get("ن").cloned().unwrap(), Value::Boolean(true));
 
-    let r = run_arabi("استورد نمط\nن = نمط.طابق(\"^[0-9]+$\", \"abc\")").unwrap();
+    let r = run_arabi("استورد نمط\nن = نمط.تطابق(\"^[0-9]+$\", \"abc\")").unwrap();
     assert_eq!(r.globals.get("ن").cloned().unwrap(), Value::Boolean(false));
 
     // ابحث (search) - dict access with ["key"]
@@ -1309,7 +1309,7 @@ fn test_107_import_random() {
 
 #[test]
 fn test_108_import_regex() {
-    let source = "استورد نمط\nالناتج6 = نمط.طابق(\"^[a-z]+$\"، \"hello\")";
+    let source = "استورد نمط\nالناتج6 = نمط.تطابق(\"^[a-z]+$\"، \"hello\")";
     let r = run_arabi(source).unwrap();
     assert_eq!(r.globals.get("الناتج6"), Some(&Value::Boolean(true)));
 }
@@ -1435,4 +1435,116 @@ fn test_121_div_by_zero() {
     let source = "حاول:\n    الناتج = 10 / 0\nخلل:\n    الناتج = \"تم\"\nنهاية:\n    مرور";
     let r = run_arabi(source).unwrap();
     assert!(r.globals.get("الناتج").is_some());
+}
+
+#[test]
+fn test_122_match_case_integer() {
+    let source = r#"
+ع = 2
+طابق ع:
+  حالة 1:
+    الناتج = "واحد"
+  حالة 2:
+    الناتج = "اثنان"
+  حالة 3:
+    الناتج = "ثلاثة"
+  حالة_اخرى:
+    الناتج = "اخرى"
+"#;
+    let r = run_arabi(source).unwrap();
+    assert_eq!(r.globals.get("الناتج"), Some(&Value::String(Rc::new("اثنان".to_string()))));
+}
+
+#[test]
+fn test_123_match_case_default() {
+    let source = r#"
+ع = 10
+طابق ع:
+  حالة 1:
+    الناتج = "واحد"
+  حالة_اخرى:
+    الناتج = "اخرى"
+"#;
+    let r = run_arabi(source).unwrap();
+    assert_eq!(r.globals.get("الناتج"), Some(&Value::String(Rc::new("اخرى".to_string()))));
+}
+
+#[test]
+fn test_124_match_case_string() {
+    let source = r#"
+اسم = "أحمد"
+طابق اسم:
+  حالة "أحمد":
+    الناتج = "مرحبا أحمد"
+  حالة "محمد":
+    الناتج = "مرحبا محمد"
+  حالة_اخرى:
+    الناتج = "مرحبا غريب"
+"#;
+    let r = run_arabi(source).unwrap();
+    assert_eq!(r.globals.get("الناتج"), Some(&Value::String(Rc::new("مرحبا أحمد".to_string()))));
+}
+
+#[test]
+fn test_125_getattr_builtin() {
+    let source = r#"
+صنف نقطة:
+  دالة __تهيئة__(هذا، ص، خ):
+    هذا.ص = ص
+    هذا.خ = خ
+
+ن = نقطة(3، 4)
+الناتج = خاصية(ن، "ص")
+"#;
+    let r = run_arabi(source).unwrap();
+    assert_eq!(r.globals.get("الناتج"), Some(&Value::Integer(3)));
+}
+
+#[test]
+fn test_126_setattr_builtin() {
+    let source = r#"
+صنف نقطة:
+  دالة __تهيئة__(هذا، ص، خ):
+    هذا.ص = ص
+    هذا.خ = خ
+
+ن = نقطة(3، 4)
+تعيين_خاصية(ن، "س"، 30)
+الناتج = خاصية(ن، "س")
+"#;
+    let r = run_arabi(source).unwrap();
+    assert_eq!(r.globals.get("الناتج"), Some(&Value::Integer(30)));
+}
+
+#[test]
+fn test_127_hasattr_builtin() {
+    let source = r#"
+صنف نقطة:
+  دالة __تهيئة__(هذا، ص، خ):
+    هذا.ص = ص
+    هذا.خ = خ
+
+ن = نقطة(3، 4)
+م1 = هل_خاصية(ن، "ص")
+م2 = هل_خاصية(ن، "لا_موجود")
+"#;
+    let r = run_arabi(source).unwrap();
+    assert_eq!(r.globals.get("م1"), Some(&Value::Boolean(true)));
+    assert_eq!(r.globals.get("م2"), Some(&Value::Boolean(false)));
+}
+
+#[test]
+fn test_128_dot_attr_access() {
+    let source = r#"
+صنف نقطة:
+  دالة __تهيئة__(هذا، ص، خ):
+    هذا.ص = ص
+    هذا.خ = خ
+
+ن = نقطة(10، 20)
+ن.ص = 100
+الناتج = ن.ص
+"#;
+    let r = run_arabi(source).unwrap();
+    assert_eq!(r.globals.get("الناتج"), Some(&Value::Integer(100)));
 }

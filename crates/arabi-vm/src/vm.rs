@@ -251,6 +251,7 @@ impl VM {
         // NEW: Added builtin names for functional/dict operations
         let builtin_names_extra = vec![
             "مسطح", "ضخم", "ادمج_فهرس_بـ", "تجميع", "عدد_تكرار", "تجزئة_قائمة", "افصل",
+            "خاصية", "تعيين_خاصية", "هل_خاصية",
         ];
         for name in builtin_names {
             self.insert_global(
@@ -1523,13 +1524,43 @@ impl VM {
                     let value = hot_pop!();
                     let mut obj = hot_pop!();
                     let name_str = module.names[b].clone();
-                    obj.set_attribute(name_str, value);
+                    if !obj.set_attribute(name_str.clone(), value.clone()) {
+                        // Try __عيّن__ magic method
+                        if let Value::Instance(rc) = &obj {
+                            if let Some(method) = rc.class.methods.get("__عيّن__").cloned() {
+                                let name_val = Value::String(Rc::new(name_str));
+                                match method.call(&[obj.clone(), name_val, value], &[], self, module) {
+                                    Ok(_) => {}
+                                    Err(e) => {
+                                        runtime_error!("استثناء_اسم", e.to_string());
+                                    }
+                                }
+                            } else {
+                                runtime_error!("استثناء_اسم", format!("لا يمكن تعيين الخاصية: {}", name_str));
+                            }
+                        } else {
+                            runtime_error!("استثناء_اسم", format!("لا يمكن تعيين الخاصية: {}", name_str));
+                        }
+                    }
                 }
                 OP_LOAD_ATTR => {
                     let obj = hot_pop!();
                     let name_str = &module.names[b];
                     if let Some(attr) = obj.get_attribute(name_str) {
                         hot_push!(attr);
+                    } else if let Value::Instance(rc) = &obj {
+                        // Try __احصل_على__ magic method
+                        if let Some(method) = rc.class.methods.get("__احصل_على__").cloned() {
+                            let name_val = Value::String(Rc::new(name_str.to_string()));
+                            match method.call(&[obj, name_val], &[], self, module) {
+                                Ok(val) => hot_push!(val),
+                                Err(e) => {
+                                    runtime_error!("استثناء_اسم", e.to_string());
+                                }
+                            }
+                        } else {
+                            runtime_error!("استثناء_اسم", format!("خاصية غير موجودة: {}", name_str));
+                        }
                     } else {
                         runtime_error!("استثناء_اسم", format!("خاصية غير موجودة: {}", name_str));
                     }
@@ -4879,7 +4910,7 @@ if let Value::Instance(rc) = &val {
                         "نمط" => {
                             let mut methods = HashMap::new();
                             let regex_fns = vec![
-                                ("طابق", "نمط_طابق"), ("ابحث", "نمط_ابحث"),
+                                ("تطابق", "نمط_طابق"), ("ابحث", "نمط_ابحث"),
                                 ("استبدل", "نمط_استبدل"), ("قسم", "نمط_قسم"),
                                 ("جميع", "نمط_جميع"), ("كل_التطابقات", "نمط_كل_التطابقات"),
                             ];

@@ -2006,6 +2006,68 @@ impl Compiler {
                     *target = end_ip - jump_end_idx;
                 }
             }
+            Stmt::Match { value, cases, default } => {
+                // Compile match/case as if/elif/else chain
+                let match_value_idx = self.get_or_create_local("__طابق_قيمة");
+                self.compile_expr(value)?;
+                self.emit(Opcode::StoreFast(match_value_idx), 0);
+
+                let mut jump_next_idxs = Vec::new();
+                let mut case_start_idxs = Vec::new();
+                let mut jump_end_idxs = Vec::new();
+
+                for (_i, (pattern, body)) in cases.iter().enumerate() {
+                    // Record start of this case
+                    case_start_idxs.push(self.instructions.len());
+
+                    // Load match value
+                    self.emit(Opcode::LoadFast(match_value_idx), 0);
+                    // Load pattern
+                    self.compile_expr(pattern)?;
+                    // Compare
+                    self.emit(Opcode::CompareEq, 0);
+                    // Jump to next case if false
+                    self.emit(Opcode::PopJumpIfFalse(0), 0);
+                    jump_next_idxs.push(self.instructions.len() - 1);
+
+                    // Compile body
+                    for stmt in &body.stmts {
+                        self.compile_stmt(stmt)?;
+                    }
+
+                    // Jump to end
+                    self.emit(Opcode::JumpForward(0), 0);
+                    jump_end_idxs.push(self.instructions.len() - 1);
+                }
+
+                // Patch jump-next offsets: each PopJumpIfFalse jumps to the next case start
+                let default_or_end = self.instructions.len();
+                for (i, &idx) in jump_next_idxs.iter().enumerate() {
+                    let target = if i + 1 < case_start_idxs.len() {
+                        case_start_idxs[i + 1]
+                    } else {
+                        default_or_end
+                    };
+                    if let Opcode::PopJumpIfFalse(ref mut offset) = self.instructions[idx].opcode {
+                        *offset = target - idx;
+                    }
+                }
+
+                // Default case
+                if let Some(default_body) = default {
+                    for stmt in &default_body.stmts {
+                        self.compile_stmt(stmt)?;
+                    }
+                }
+
+                // Patch all jump-to-end
+                let end_ip = self.instructions.len();
+                for idx in jump_end_idxs {
+                    if let Opcode::JumpForward(ref mut offset) = self.instructions[idx].opcode {
+                        *offset = end_ip - idx;
+                    }
+                }
+            }
             Stmt::Delete(expr) => {
                 if let Expr::Identifier(name) = expr {
                     let idx = self.get_or_create_local(name);

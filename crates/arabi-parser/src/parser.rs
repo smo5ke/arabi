@@ -132,6 +132,7 @@ impl Parser {
                 Ok(Stmt::YieldFrom(value))
             }
             Token::Keyword(Keyword::With) => self.parse_with(),
+            Token::Keyword(Keyword::Match) => self.parse_match(),
             _ => self.parse_expression_statement(),
         }
     }
@@ -1166,6 +1167,49 @@ impl Parser {
         Ok(Stmt::With { context, target, body })
     }
 
+    fn parse_match(&mut self) -> Result<Stmt> {
+        self.advance(); // consume 'طابق'
+        let value = self.parse_expression()?;
+        self.consume_delim(Delimiter::Colon)?;
+        // Skip newline and indent
+        while self.check(&Token::Newline) || matches!(self.current(), Token::Indent(_)) {
+            self.advance();
+        }
+        let mut cases = Vec::new();
+        let mut default = None;
+
+        while !self.is_at_end() {
+            // Skip newlines and indents
+            while self.check(&Token::Newline) || matches!(self.current(), Token::Indent(_)) {
+                self.advance();
+            }
+            if self.is_at_end() || matches!(self.current(), Token::Dedent(_)) {
+                break;
+            }
+
+            if self.check(&Token::Keyword(Keyword::CaseDefault)) {
+                self.advance(); // consume 'حالة_اخرى'
+                self.consume_delim(Delimiter::Colon)?;
+                default = Some(self.parse_block()?);
+            } else if self.check(&Token::Keyword(Keyword::Case)) {
+                self.advance(); // consume 'حالة'
+                let pattern = self.parse_expression()?;
+                self.consume_delim(Delimiter::Colon)?;
+                let body = self.parse_block()?;
+                cases.push((pattern, body));
+            } else {
+                break;
+            }
+        }
+
+        // Skip the outer Dedent
+        if matches!(self.current(), Token::Dedent(_)) {
+            self.advance();
+        }
+
+        Ok(Stmt::Match { value, cases, default })
+    }
+
     fn parse_params(&mut self) -> Result<Vec<Param>> {
         let mut params = Vec::new();
 
@@ -1281,6 +1325,13 @@ impl Parser {
                 span: self.current_span(),
             }),
         }
+    }
+
+    fn consume_newline(&mut self) -> Result<()> {
+        if self.check(&Token::Newline) {
+            self.advance();
+        }
+        Ok(())
     }
 
     fn check(&self, token: &Token) -> bool {
