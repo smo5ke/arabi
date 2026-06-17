@@ -1607,7 +1607,7 @@ impl Compiler {
                     self.emit(Opcode::LoadFast(temp_idx), 0);
                     self.emit(Opcode::PopTop, 0);
                 } else {
-                    let star_pos = targets.iter().position(|(_, s)| *s).unwrap();
+                    let star_pos = targets.iter().position(|(_, s)| *s).expect("Star target expected but not found in multi-assign");
                     let before_count = star_pos;
                     let after_count = targets.len() - 1 - star_pos;
 

@@ -51,11 +51,11 @@ unsafe impl Sync for CraneliftJIT {}
 impl CraneliftJIT {
     pub fn new() -> Self {
         let mut flag_builder = settings::builder();
-        flag_builder.set("use_colocated_libcalls", "false").unwrap();
-        flag_builder.set("is_pic", "false").unwrap();
+        flag_builder.set("use_colocated_libcalls", "false").expect("Invalid Cranelift setting");
+        flag_builder.set("is_pic", "false").expect("Invalid Cranelift setting");
         let isa_builder = cranelift_native::builder()
             .unwrap_or_else(|msg| panic!("host machine not supported: {msg}"));
-        let isa = isa_builder.finish(settings::Flags::new(flag_builder)).unwrap();
+        let isa = isa_builder.finish(settings::Flags::new(flag_builder)).expect("Failed to build Cranelift ISA");
         let builder = JITBuilder::with_isa(isa, default_libcall_names());
         let module = JITModule::new(builder);
         let func_ctx = FunctionBuilderContext::new();
@@ -64,11 +64,11 @@ impl CraneliftJIT {
 
     pub fn with_symbols<F: FnOnce(&mut JITBuilder)>(register: F) -> Self {
         let mut flag_builder = settings::builder();
-        flag_builder.set("use_colocated_libcalls", "false").unwrap();
-        flag_builder.set("is_pic", "false").unwrap();
+        flag_builder.set("use_colocated_libcalls", "false").expect("Invalid Cranelift setting");
+        flag_builder.set("is_pic", "false").expect("Invalid Cranelift setting");
         let isa_builder = cranelift_native::builder()
             .unwrap_or_else(|msg| panic!("host machine not supported: {msg}"));
-        let isa = isa_builder.finish(settings::Flags::new(flag_builder)).unwrap();
+        let isa = isa_builder.finish(settings::Flags::new(flag_builder)).expect("Failed to build Cranelift ISA");
         let mut builder = JITBuilder::with_isa(isa, default_libcall_names());
         register(&mut builder);
         let module = JITModule::new(builder);
@@ -277,7 +277,7 @@ fn declare_helpers(module: &mut JITModule, bcx: &mut FunctionBuilder) -> JitHelp
         let mut sig = Signature::new(CallConv::SystemV);
         sig.params.extend(params.iter().map(|&t| AbiParam::new(t)));
         sig.returns.extend(returns.iter().map(|&t| AbiParam::new(t)));
-        let func_id = module.declare_function(name, Linkage::Import, &sig).unwrap();
+        let func_id = module.declare_function(name, Linkage::Import, &sig).expect("JIT: failed to declare runtime helper function");
         module.declare_func_in_func(func_id, &mut bcx.func)
     }
     JitHelpers {
@@ -335,7 +335,7 @@ fn emit_loop_bytecode(
 
         match opcode {
             OP_HALT | OP_RETURN_VALUE => {
-                let val = if !stack.is_empty() { stack.pop().unwrap() } else {
+                let val = if !stack.is_empty() { stack.pop().expect("JIT: stack non-empty but pop failed") } else {
                     bcx.ins().iconst(ty::I64, 0)
                 };
                 bcx.ins().return_(&[val]);
@@ -692,7 +692,7 @@ fn emit_loop_bytecode(
                     let first_op = (module.packed[body] & 0xFF) as u8;
                     if first_op == OP_JUMP_FORWARD { body + 1 } else { body }
                 };
-                let entry_block = *block_map.get(&loop_start).unwrap();
+                let entry_block = *block_map.get(&loop_start).expect("JIT: loop block not found in block_map — malformed bytecode");
                 bcx.ins().jump(entry_block, &[]);
                 let new_block = bcx.create_block();
                 bcx.switch_to_block(new_block);

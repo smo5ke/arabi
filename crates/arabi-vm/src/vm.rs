@@ -476,10 +476,10 @@ impl VM {
 
         let stack_ptr: *mut Vec<Value> = &mut self.stack as *mut Vec<Value>;
         let mut locals_ptr: *mut Value = unsafe {
-            let frame = self.frames.last().unwrap();
+            let frame = self.frames.last().expect("VM frame stack empty: frame push/pop imbalance");
             self.locals_arena.as_mut_ptr().add(frame.arena_offset)
         };
-        let mut locals_len = self.frames.last().unwrap().arena_len;
+        let mut locals_len = self.frames.last().expect("VM frame stack empty: frame push/pop imbalance").arena_len;
 
         macro_rules! hot_push {
             ($v:expr) => { unsafe { (*stack_ptr).push($v) } }
@@ -1017,7 +1017,7 @@ impl VM {
                                         let mut borrowed = cell.borrow_mut();
                                         if let Value::String(s) = &mut *borrowed {
                                             if Rc::strong_count(s) == 1 {
-                                                Rc::get_mut(s).unwrap().push_str(&right_str);
+                                                Rc::get_mut(s).expect("String Rc unexpectedly shared during in-place mutation").push_str(&right_str);
                                             } else {
                                                 let mut new_str = (**s).clone();
                                                 new_str.push_str(&right_str);
@@ -1027,7 +1027,7 @@ impl VM {
                                     }
                                     Value::String(s) => {
                                         if Rc::strong_count(s) == 1 {
-                                            Rc::get_mut(s).unwrap().push_str(&right_str);
+                                            Rc::get_mut(s).expect("String Rc unexpectedly shared during in-place mutation").push_str(&right_str);
                                         } else {
                                             let mut new_str = (**s).clone();
                                             new_str.push_str(&right_str);
@@ -1676,7 +1676,7 @@ impl VM {
                                             r
                                         };
                                         if self.current_exception.is_some() {
-                                            let exc = self.current_exception.take().unwrap();
+                                            let exc = self.current_exception.take().expect("Exception handler entered without pending exception");
                                             if let Value::Exception(ref e) = exc {
                                                 return Err(RuntimeError::new_typed(&e.class_name, &e.message).with_line(e.line.unwrap_or(0)));
                                             }
@@ -1699,7 +1699,7 @@ impl VM {
                                     }
                                     self.frames.push(Frame { arena_offset, arena_len: num_locals, return_ip: ret_ip, saved_handler_len, saved_stack_len });
                                     {
-                                        let frame = self.frames.last().unwrap();
+                                        let frame = self.frames.last().expect("VM frame stack empty: frame push/pop imbalance");
                                         locals_ptr = unsafe { self.locals_arena.as_mut_ptr().add(frame.arena_offset) };
                                         locals_len = frame.arena_len;
                                     }
@@ -1768,7 +1768,7 @@ impl VM {
                                 };
                                 let result = try_or_catch!(result);
                                 {
-                                    let frame = self.frames.last().unwrap();
+                                    let frame = self.frames.last().expect("VM frame stack empty: frame push/pop imbalance");
                                     locals_ptr = unsafe { self.locals_arena.as_mut_ptr().add(frame.arena_offset) };
                                     locals_len = frame.arena_len;
                                 }
@@ -1779,7 +1779,7 @@ impl VM {
                                 let args = vec![arg0];
                                 let result = try_or_catch!(other.call(&args, &[], self, module));
                                 {
-                                    let frame = self.frames.last().unwrap();
+                                    let frame = self.frames.last().expect("VM frame stack empty: frame push/pop imbalance");
                                     locals_ptr = unsafe { self.locals_arena.as_mut_ptr().add(frame.arena_offset) };
                                     locals_len = frame.arena_len;
                                 }
@@ -1794,7 +1794,7 @@ impl VM {
                             Value::Generator(d) => {
                                 let result = self.send_generator(&d, Value::Null, module).unwrap_or_else(|e| { self.current_exception = Some(e.into_value()); Value::Null });
                                 {
-                                    let frame = self.frames.last().unwrap();
+                                    let frame = self.frames.last().expect("VM frame stack empty: frame push/pop imbalance");
                                     locals_ptr = unsafe { self.locals_arena.as_mut_ptr().add(frame.arena_offset) };
                                     locals_len = frame.arena_len;
                                 }
@@ -1852,7 +1852,7 @@ impl VM {
                                             r
                                         };
                                         if self.current_exception.is_some() {
-                                            let exc = self.current_exception.take().unwrap();
+                                            let exc = self.current_exception.take().expect("Exception handler entered without pending exception");
                                             if let Value::Exception(ref e) = exc {
                                                 return Err(RuntimeError::new_typed(&e.class_name, &e.message).with_line(e.line.unwrap_or(0)));
                                             }
@@ -1875,7 +1875,7 @@ impl VM {
                                     }
                                     self.frames.push(Frame { arena_offset, arena_len: num_locals, return_ip: ret_ip, saved_handler_len, saved_stack_len });
                                     {
-                                        let frame = self.frames.last().unwrap();
+                                        let frame = self.frames.last().expect("VM frame stack empty: frame push/pop imbalance");
                                         locals_ptr = unsafe { self.locals_arena.as_mut_ptr().add(frame.arena_offset) };
                                         locals_len = frame.arena_len;
                                     }
@@ -1901,7 +1901,7 @@ impl VM {
                                 }
                                 let result = try_or_catch!(Value::NativeFunction(Rc::clone(nf)).call(&[], &[], self, module));
                                 {
-                                    let frame = self.frames.last().unwrap();
+                                    let frame = self.frames.last().expect("VM frame stack empty: frame push/pop imbalance");
                                     locals_ptr = unsafe { self.locals_arena.as_mut_ptr().add(frame.arena_offset) };
                                     locals_len = frame.arena_len;
                                 }
@@ -1979,7 +1979,7 @@ impl VM {
                                             r
                                         };
                                         if self.current_exception.is_some() {
-                                            let exc = self.current_exception.take().unwrap();
+                                            let exc = self.current_exception.take().expect("Exception handler entered without pending exception");
                                             if let Value::Exception(ref e) = exc {
                                                 return Err(RuntimeError::new_typed(&e.class_name, &e.message).with_line(e.line.unwrap_or(0)));
                                             }
@@ -2002,7 +2002,7 @@ impl VM {
                                     }
                                     self.frames.push(Frame { arena_offset, arena_len: num_locals, return_ip: ret_ip, saved_handler_len, saved_stack_len });
                                     {
-                                        let frame = self.frames.last().unwrap();
+                                        let frame = self.frames.last().expect("VM frame stack empty: frame push/pop imbalance");
                                         locals_ptr = unsafe { self.locals_arena.as_mut_ptr().add(frame.arena_offset) };
                                         locals_len = frame.arena_len;
                                     }
@@ -2029,7 +2029,7 @@ impl VM {
                                 };
                                 let result = try_or_catch!(result);
                                 {
-                                    let frame = self.frames.last().unwrap();
+                                    let frame = self.frames.last().expect("VM frame stack empty: frame push/pop imbalance");
                                     locals_ptr = unsafe { self.locals_arena.as_mut_ptr().add(frame.arena_offset) };
                                     locals_len = frame.arena_len;
                                 }
@@ -2040,7 +2040,7 @@ impl VM {
                                 let args = vec![arg0, arg1];
                                 let result = try_or_catch!(other.call(&args, &[], self, module));
                                 {
-                                    let frame = self.frames.last().unwrap();
+                                    let frame = self.frames.last().expect("VM frame stack empty: frame push/pop imbalance");
                                     locals_ptr = unsafe { self.locals_arena.as_mut_ptr().add(frame.arena_offset) };
                                     locals_len = frame.arena_len;
                                 }
@@ -2095,7 +2095,7 @@ impl VM {
                                     }
                                     self.frames.push(Frame { arena_offset, arena_len: num_locals, return_ip: ret_ip, saved_handler_len, saved_stack_len });
                                     {
-                                        let frame = self.frames.last().unwrap();
+                                        let frame = self.frames.last().expect("VM frame stack empty: frame push/pop imbalance");
                                         locals_ptr = unsafe { self.locals_arena.as_mut_ptr().add(frame.arena_offset) };
                                         locals_len = frame.arena_len;
                                     }
@@ -2107,7 +2107,7 @@ impl VM {
                                 let send_val = args.first().cloned().unwrap_or(Value::Null);
                                 let result = self.send_generator(&d, send_val, module).unwrap_or_else(|e| { self.current_exception = Some(e.into_value()); Value::Null });
                                 {
-                                    let frame = self.frames.last().unwrap();
+                                    let frame = self.frames.last().expect("VM frame stack empty: frame push/pop imbalance");
                                     locals_ptr = unsafe { self.locals_arena.as_mut_ptr().add(frame.arena_offset) };
                                     locals_len = frame.arena_len;
                                 }
@@ -2156,7 +2156,7 @@ impl VM {
                                     let _ = self.run_frame(module)?;
                                     self.pop_frame();
                                     {
-                                        let frame = self.frames.last().unwrap();
+                                        let frame = self.frames.last().expect("VM frame stack empty: frame push/pop imbalance");
                                         locals_ptr = unsafe { self.locals_arena.as_mut_ptr().add(frame.arena_offset) };
                                         locals_len = frame.arena_len;
                                     }
@@ -2182,7 +2182,7 @@ impl VM {
                                 };
                                 let result = try_or_catch!(result);
                                 {
-                                    let frame = self.frames.last().unwrap();
+                                    let frame = self.frames.last().expect("VM frame stack empty: frame push/pop imbalance");
                                     locals_ptr = unsafe { self.locals_arena.as_mut_ptr().add(frame.arena_offset) };
                                     locals_len = frame.arena_len;
                                 }
@@ -2192,7 +2192,7 @@ impl VM {
                             other => {
                                 let result = try_or_catch!(other.call(&args, &[], self, module));
                                 {
-                                    let frame = self.frames.last().unwrap();
+                                    let frame = self.frames.last().expect("VM frame stack empty: frame push/pop imbalance");
                                     locals_ptr = unsafe { self.locals_arena.as_mut_ptr().add(frame.arena_offset) };
                                     locals_len = frame.arena_len;
                                 }
@@ -2202,7 +2202,7 @@ impl VM {
                         }
                     };
                     {
-                        let frame = self.frames.last().unwrap();
+                        let frame = self.frames.last().expect("VM frame stack empty: frame push/pop imbalance");
                         locals_ptr = unsafe { self.locals_arena.as_mut_ptr().add(frame.arena_offset) };
                         locals_len = frame.arena_len;
                     }
@@ -2233,7 +2233,7 @@ impl VM {
                     let func = hot_pop!();
                     let result = try_or_catch!(func.call(&args, &kwargs, self, module));
                     {
-                        let frame = self.frames.last().unwrap();
+                        let frame = self.frames.last().expect("VM frame stack empty: frame push/pop imbalance");
                         locals_ptr = unsafe { self.locals_arena.as_mut_ptr().add(frame.arena_offset) };
                         locals_len = frame.arena_len;
                     }
@@ -2282,7 +2282,7 @@ impl VM {
                     let func = hot_pop!();
                     let result = try_or_catch!(func.call(&final_args, &unpacked_kwargs, self, module));
                     {
-                        let frame = self.frames.last().unwrap();
+                        let frame = self.frames.last().expect("VM frame stack empty: frame push/pop imbalance");
                         locals_ptr = unsafe { self.locals_arena.as_mut_ptr().add(frame.arena_offset) };
                         locals_len = frame.arena_len;
                     }
@@ -2335,7 +2335,7 @@ impl VM {
 
                     if let Value::Function(ref f) = func_val {
                         if !f.is_generator {
-                            let frame = self.frames.last_mut().unwrap();
+                            let frame = self.frames.last_mut().expect("VM frame stack empty: frame push/pop imbalance");
                             let arena_offset = frame.arena_offset;
                             let num_locals = f.num_locals.max(1);
                             if num_locals > frame.arena_len {
@@ -2381,7 +2381,7 @@ impl VM {
                     }
                     let result = try_or_catch!(func_val.call(&args, &[], self, module));
                     {
-                        let frame = self.frames.last().unwrap();
+                        let frame = self.frames.last().expect("VM frame stack empty: frame push/pop imbalance");
                         locals_ptr = unsafe { self.locals_arena.as_mut_ptr().add(frame.arena_offset) };
                         locals_len = frame.arena_len;
                     }
@@ -3783,7 +3783,7 @@ let next_method_clone = rc.class.methods.get("__التالي__").cloned();
                     };
                     // Re-acquire locals pointers after Generator/Instance ForIter
                     {
-                        let frame = self.frames.last().unwrap();
+                        let frame = self.frames.last().expect("VM frame stack empty: frame push/pop imbalance");
                         locals_ptr = unsafe { self.locals_arena.as_mut_ptr().add(frame.arena_offset) };
                         locals_len = frame.arena_len;
                     }
@@ -3801,7 +3801,7 @@ if let Value::Instance(rc) = &val {
                         if let Some(method) = method_clone {
                             if let Ok(result) = method.call(std::slice::from_ref(&val), &[], self, module) {
                                 {
-                                    let frame = self.frames.last().unwrap();
+                                    let frame = self.frames.last().expect("VM frame stack empty: frame push/pop imbalance");
                                     locals_ptr = unsafe { self.locals_arena.as_mut_ptr().add(frame.arena_offset) };
                                     locals_len = frame.arena_len;
                                 }
@@ -3814,7 +3814,7 @@ if let Value::Instance(rc) = &val {
                             if let Some(method) = method_clone {
                                 if let Ok(result) = method.call(std::slice::from_ref(&val), &[], self, module) {
                                     {
-                                        let frame = self.frames.last().unwrap();
+                                        let frame = self.frames.last().expect("VM frame stack empty: frame push/pop imbalance");
                                         locals_ptr = unsafe { self.locals_arena.as_mut_ptr().add(frame.arena_offset) };
                                         locals_len = frame.arena_len;
                                     }
@@ -4138,7 +4138,7 @@ if let Value::Instance(rc) = &val {
                                     };
                                     hot_push!(result);
                                     {
-                                        let frame = self.frames.last().unwrap();
+                                        let frame = self.frames.last().expect("VM frame stack empty: frame push/pop imbalance");
                                         locals_ptr = unsafe { self.locals_arena.as_mut_ptr().add(frame.arena_offset) };
                                         locals_len = frame.arena_len;
                                     }
@@ -4176,7 +4176,7 @@ if let Value::Instance(rc) = &val {
                                     }
                                     self.frames.push(Frame { arena_offset, arena_len: n_locals, return_ip: ret_ip, saved_handler_len, saved_stack_len });
                                     {
-                                        let frame = self.frames.last().unwrap();
+                                        let frame = self.frames.last().expect("VM frame stack empty: frame push/pop imbalance");
                                                     locals_ptr = unsafe { self.locals_arena.as_mut_ptr().add(frame.arena_offset) };
                                                     locals_len = frame.arena_len;
                                                 }
@@ -4191,7 +4191,7 @@ if let Value::Instance(rc) = &val {
                                             all_args.extend(args.iter().cloned());
                                             let result = try_or_catch!(method_val.call(&all_args, &[], self, module));
                                             {
-                                                let frame = self.frames.last().unwrap();
+                                                let frame = self.frames.last().expect("VM frame stack empty: frame push/pop imbalance");
                                                 locals_ptr = unsafe { self.locals_arena.as_mut_ptr().add(frame.arena_offset) };
                                                 locals_len = frame.arena_len;
                                             }
@@ -4237,7 +4237,7 @@ if let Value::Instance(rc) = &val {
                                     };
                                     hot_push!(result);
                                     {
-                                        let frame = self.frames.last().unwrap();
+                                        let frame = self.frames.last().expect("VM frame stack empty: frame push/pop imbalance");
                                         locals_ptr = unsafe { self.locals_arena.as_mut_ptr().add(frame.arena_offset) };
                                         locals_len = frame.arena_len;
                                     }
@@ -4272,7 +4272,7 @@ if let Value::Instance(rc) = &val {
                                         }
                                         self.frames.push(Frame { arena_offset, arena_len: n_locals, return_ip: ret_ip, saved_handler_len, saved_stack_len });
                                         {
-                                            let frame = self.frames.last().unwrap();
+                                            let frame = self.frames.last().expect("VM frame stack empty: frame push/pop imbalance");
                                             locals_ptr = unsafe { self.locals_arena.as_mut_ptr().add(frame.arena_offset) };
                                             locals_len = frame.arena_len;
                                         }
@@ -4288,7 +4288,7 @@ if let Value::Instance(rc) = &val {
                                     all_args.extend(args.iter().cloned());
                                     let result = try_or_catch!(nf_clone.call(&all_args, &[], self, module));
                                     {
-                                        let frame = self.frames.last().unwrap();
+                                        let frame = self.frames.last().expect("VM frame stack empty: frame push/pop imbalance");
                                         locals_ptr = unsafe { self.locals_arena.as_mut_ptr().add(frame.arena_offset) };
                                         locals_len = frame.arena_len;
                                     }
@@ -4650,7 +4650,7 @@ if let Value::Instance(rc) = &val {
                                         }
                                         self.frames.push(Frame { arena_offset, arena_len: n_locals, return_ip: ret_ip, saved_handler_len, saved_stack_len });
                                         {
-                                            let frame = self.frames.last().unwrap();
+                                            let frame = self.frames.last().expect("VM frame stack empty: frame push/pop imbalance");
                                             locals_ptr = unsafe { self.locals_arena.as_mut_ptr().add(frame.arena_offset) };
                                             locals_len = frame.arena_len;
                                         }
@@ -4685,7 +4685,7 @@ if let Value::Instance(rc) = &val {
                     }
                     // Re-acquire locals pointer after frame change in CallMethod
                     {
-                        let frame = self.frames.last().unwrap();
+                        let frame = self.frames.last().expect("VM frame stack empty: frame push/pop imbalance");
                         locals_ptr = unsafe { self.locals_arena.as_mut_ptr().add(frame.arena_offset) };
                         locals_len = frame.arena_len;
                     }

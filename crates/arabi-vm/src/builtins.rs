@@ -459,7 +459,7 @@ pub fn call_native(name: &str, args: &[Value], kwargs: &[(String, Value)], vm: &
             use std::time::SystemTime;
             let now = SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap();
+                .unwrap_or_default();
             let secs = now.as_secs();
             let millis = now.subsec_millis() as u64;
             let total_millis = secs * 1000 + millis;
@@ -474,7 +474,7 @@ pub fn call_native(name: &str, args: &[Value], kwargs: &[(String, Value)], vm: &
             use std::time::SystemTime;
             let t = SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap()
+                .unwrap_or_default()
                 .as_secs_f64();
             Ok(Value::Float(t))
         }
@@ -482,7 +482,7 @@ pub fn call_native(name: &str, args: &[Value], kwargs: &[(String, Value)], vm: &
             use std::time::SystemTime;
             let t = SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap()
+                .unwrap_or_default()
                 .as_millis() as i64;
             Ok(Value::Integer(t))
         }
@@ -748,7 +748,7 @@ pub fn call_native(name: &str, args: &[Value], kwargs: &[(String, Value)], vm: &
             use std::time::SystemTime;
             let t = SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap()
+                .unwrap_or_default()
                 .as_secs() as i64;
             Ok(Value::Integer(t))
         }
@@ -756,7 +756,7 @@ pub fn call_native(name: &str, args: &[Value], kwargs: &[(String, Value)], vm: &
             use std::time::SystemTime;
             let t = SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap()
+                .unwrap_or_default()
                 .as_secs_f64() * 1000.0;
             Ok(Value::Float(t))
         }
@@ -764,7 +764,7 @@ pub fn call_native(name: &str, args: &[Value], kwargs: &[(String, Value)], vm: &
             use std::time::SystemTime;
             let now = SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap();
+                .unwrap_or_default();
             let secs = now.as_secs();
             let remaining = secs % 86400;
             let hours = remaining / 3600;
@@ -776,7 +776,7 @@ pub fn call_native(name: &str, args: &[Value], kwargs: &[(String, Value)], vm: &
             use std::time::SystemTime;
             let now = SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap();
+                .unwrap_or_default();
             let secs = now.as_secs();
             let days = secs / 86400;
             let year = 1970 + (days / 365) as i64;
@@ -791,7 +791,7 @@ pub fn call_native(name: &str, args: &[Value], kwargs: &[(String, Value)], vm: &
         }
         "زمان" => {
             use std::time::SystemTime;
-            let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap();
+            let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default();
             let secs = now.as_secs();
             let ms = now.subsec_millis();
             let days = secs / 86400;
@@ -824,42 +824,42 @@ pub fn call_native(name: &str, args: &[Value], kwargs: &[(String, Value)], vm: &
         }
         "سنة" => {
             use std::time::SystemTime;
-            let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap();
+            let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default();
             let days = now.as_secs() / 86400;
             Ok(Value::Integer(1970 + (days / 365) as i64))
         }
         "شهر" => {
             use std::time::SystemTime;
-            let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap();
+            let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default();
             let days = now.as_secs() / 86400;
             Ok(Value::Integer(((days % 365) / 30 + 1) as i64))
         }
         "يوم" => {
             use std::time::SystemTime;
-            let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap();
+            let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default();
             let days = now.as_secs() / 86400;
             Ok(Value::Integer(((days % 365) % 30 + 1) as i64))
         }
         "ساعة" => {
             use std::time::SystemTime;
-            let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap();
+            let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default();
             let remaining = now.as_secs() % 86400;
             Ok(Value::Integer((remaining / 3600) as i64))
         }
         "دقيقة" => {
             use std::time::SystemTime;
-            let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap();
+            let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default();
             let remaining = now.as_secs() % 86400;
             Ok(Value::Integer(((remaining % 3600) / 60) as i64))
         }
         "ثانية" => {
             use std::time::SystemTime;
-            let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap();
+            let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default();
             Ok(Value::Integer((now.as_secs() % 60) as i64))
         }
         "يوم_الاسبوع" => {
             use std::time::SystemTime;
-            let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap();
+            let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default();
             let days = (now.as_secs() / 86400) as i64;
             let dow = (days + 4) % 7;
             let names = ["احد", "اثنين", "ثلاثاء", "اربعاء", "خميس", "جمعة", "سبت"];
@@ -893,7 +893,7 @@ pub fn call_native(name: &str, args: &[Value], kwargs: &[(String, Value)], vm: &
             use std::time::SystemTime;
             let t = SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap()
+                .unwrap_or_default()
                 .as_nanos() as u64;
             let val = (t >> 11) as f64 / (1u64 << 53) as f64;
             Ok(Value::Float(val))
@@ -913,7 +913,7 @@ pub fn call_native(name: &str, args: &[Value], kwargs: &[(String, Value)], vm: &
             use std::time::SystemTime;
             let t = SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap()
+                .unwrap_or_default()
                 .as_nanos() as u64;
             let range = (max - min + 1) as f64;
             let val = min + (((t >> 11) as f64 / (1u64 << 53) as f64) * range) as i64;
@@ -963,7 +963,7 @@ pub fn call_native(name: &str, args: &[Value], kwargs: &[(String, Value)], vm: &
                 if val == 0 {
                     val = std::time::SystemTime::now()
                         .duration_since(std::time::SystemTime::UNIX_EPOCH)
-                        .unwrap()
+                        .unwrap_or_default()
                         .as_nanos() as u64;
                 }
                 val = val.wrapping_mul(6364136223846793005).wrapping_add(1);
@@ -2378,7 +2378,7 @@ pub fn call_native(name: &str, args: &[Value], kwargs: &[(String, Value)], vm: &
                         Value::String(stdout.into()),
                         Value::String(stderr.into()),
                     ])));
-                    Ok(result.into_iter().next().unwrap())
+                    Ok(result.into_iter().next().expect("Vec just pushed one element"))
                 }
                 Err(e) => Err(RuntimeError::new(format!("فشل تنفيذ الأمر: {}", e))),
             }

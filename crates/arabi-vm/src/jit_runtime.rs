@@ -222,7 +222,7 @@ pub extern "C" fn arabi_jit_subscript_gt(
 pub extern "C" fn arabi_jit_get_time() -> f64 {
     SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap()
+        .unwrap_or_default()
         .as_secs_f64()
 }
 
