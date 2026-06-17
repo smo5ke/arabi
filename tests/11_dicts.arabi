@@ -1,0 +1,5 @@
+d = {"مفتاح": "arabi"، "age": 25}
+assert(d["مفتاح"] == "arabi")
+assert(d["age"] == 25)
+
+print("11. Dicts OK")

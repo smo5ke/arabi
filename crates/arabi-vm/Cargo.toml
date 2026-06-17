@@ -1,0 +1,20 @@
+[package]
+name = "arabi-vm"
+description = "Virtual machine and runtime for the Arabi programming language"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+arabi-core.workspace = true
+arabi-compiler.workspace = true
+arabi-lexer.workspace = true
+arabi-parser.workspace = true
+arabi-jit.workspace = true
+thiserror.workspace = true
+serde_json.workspace = true
+regex.workspace = true
+base64.workspace = true
+ureq.workspace = true

@@ -1,0 +1,10 @@
+def my_range():
+    for i in range(5):
+        yield i
+
+g = my_range()
+assert(g() == 0)
+assert(g() == 1)
+assert(g() == 2)
+
+print("14. Generators OK")

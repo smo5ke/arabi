@@ -1,0 +1,8 @@
+name = "arabi"
+age = 25
+s1 = f"Name: {name}"
+assert(s1 == "Name: arabi")
+s2 = f"Age: {age}"
+assert(s2 == "Age: 25")
+
+print("9. F-Strings OK")

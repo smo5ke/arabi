@@ -1,0 +1,5 @@
+s = set([1، 2، 3، 1])
+assert(len(s) == 3)
+assert(1 in s)
+
+print("10. Sets OK")

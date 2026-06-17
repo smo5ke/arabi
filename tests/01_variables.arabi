@@ -1,0 +1,22 @@
+s = 42
+f = 3.14
+n = عربي
+b = صح
+lst = [1، 2، 3]
+d = {"مفتاح": "value"}
+st = set([1، 2، 3])
+
+assert(s == 42)
+assert(f == 3.14)
+assert(n == "عربي")
+assert(b)
+assert(len(lst) == 3)
+assert(d["مفتاح"] == "value")
+assert(len(st) == 3)
+
+a، b، c = 1، 2، 3
+assert(a == 1)
+assert(b == 2)
+assert(c == 3)
+
+print("1. Variables OK")

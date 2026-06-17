@@ -1,0 +1,11 @@
+[package]
+name = "arabi-core"
+description = "Core types and error definitions for the Arabi programming language"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+thiserror.workspace = true

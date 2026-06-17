@@ -1,0 +1,26 @@
+[package]
+name = "arabi-cli"
+description = "Arabic programming language CLI and REPL"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "../../README.md"
+keywords = ["programming-language", "arabic", "interpreter"]
+categories = ["command-line-utilities", "programming-languages"]
+publish = false
+
+[[bin]]
+name = "arabi"
+path = "src/main.rs"
+
+[dependencies]
+arabi-lexer.workspace = true
+arabi-parser.workspace = true
+arabi-compiler.workspace = true
+arabi-vm.workspace = true
+anyhow.workspace = true
+rustyline.workspace = true
+serde_json.workspace = true
+mimalloc = "0.1"

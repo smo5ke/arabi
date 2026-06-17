@@ -1,0 +1,25 @@
+def add(a, b):
+    return a + b
+assert(add(3, 4) == 7)
+
+def fib(n):
+    if n <= 1:
+        return n
+    return fib(n - 1) + fib(n - 2)
+assert(fib(0) == 0)
+assert(fib(1) == 1)
+assert(fib(10) == 55)
+
+def greet(name = "world"):
+    return "hello " + name
+assert(len(greet()) > 5)
+assert(greet("Arabi") == "hello Arabi")
+
+def sum_all(*args):
+    n = 0
+    for i in args:
+        n += i
+    return n
+assert(sum_all(1، 2، 3) == 6)
+
+print("6. Functions OK")

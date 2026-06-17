@@ -1,0 +1,6 @@
+[toolchain]
+channel = "stable"
+msrv = "1.75.0"
+components = ["rustfmt", "clippy"]
+targets = []
+profile = "default"

@@ -1,0 +1,17 @@
+a = "hello"
+b = " world"
+assert(a + b == "hello world")
+assert(len("abc") == 3)
+assert("abc"[0] == "a")
+assert("abc"[1] == "b")
+assert("abc"[-1] == "c")
+assert("hello" == "hello")
+assert("hello" != "world")
+name = "arabi"
+s2 = "lang " + name
+assert(len(s2) > 5)
+assert("hello" * 3 == "hellohellohello")
+parts = "hello world".split(" ")
+assert(len(parts) == 2)
+
+print("3. Strings OK")

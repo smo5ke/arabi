@@ -1,0 +1,13 @@
+def make_counter(start):
+    count = start
+    def increment():
+        count += 1
+        return count
+    return increment
+
+c = make_counter(0)
+assert(c() == 1)
+assert(c() == 2)
+assert(c() == 3)
+
+print("13. Closures OK")

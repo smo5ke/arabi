@@ -1,0 +1,13 @@
+try:
+    raise("custom error")
+except:
+    print("caught")
+
+try:
+    n = 10 / 0
+except:
+    n = 0
+finally:
+    assert(n == 0)
+
+print("12. Exceptions OK")

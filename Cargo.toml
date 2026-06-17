@@ -1,0 +1,52 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/arabi-core",
+    "crates/arabi-lexer",
+    "crates/arabi-parser",
+    "crates/arabi-compiler",
+    "crates/arabi-vm",
+    "crates/arabi-jit",
+    "crates/arabi-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Arabi Team"]
+license = "MIT"
+license-file = "LICENSE"
+repository = "https://github.com/arabi-lang/arabi"
+description = "Arabic programming language with Rust VM, JIT compiler, and 170+ built-in functions"
+readme = "README.md"
+keywords = ["programming-language", "arabic", "interpreter", "jit", "virtual-machine"]
+categories = ["programming-languages", "command-line-utilities"]
+
+[profile.release]
+opt-level = 3
+
+[workspace.dependencies]
+# Internal crates
+arabi-core = { path = "crates/arabi-core" }
+arabi-lexer = { path = "crates/arabi-lexer" }
+arabi-parser = { path = "crates/arabi-parser" }
+arabi-compiler = { path = "crates/arabi-compiler" }
+arabi-vm = { path = "crates/arabi-vm" }
+arabi-jit = { path = "crates/arabi-jit" }
+
+# External dependencies
+thiserror = "2.0"
+anyhow = "1.0"
+unicode-normalization = "0.1"
+unicode-ident = "1.0"
+serde_json = "1.0"
+rustyline = "14"
+cranelift = "0.132"
+cranelift-jit = "0.132"
+cranelift-module = "0.132"
+cranelift-frontend = "0.132"
+cranelift-native = "0.132"
+target-lexicon = "0.13"
+regex = "1"
+base64 = "0.22"
+ureq = "2"

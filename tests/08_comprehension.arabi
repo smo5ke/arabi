@@ -1,0 +1,7 @@
+squares = [x ^ 2 for x in range(6)]
+assert(squares == [0، 1، 4، 9، 16، 25])
+
+evens = [x for x in range(10) if x % 2 == 0]
+assert(evens == [0، 2، 4، 6، 8])
+
+print("8. Comprehension OK")

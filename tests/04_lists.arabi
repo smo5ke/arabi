@@ -1,0 +1,25 @@
+lst = [1، 2، 3، 4، 5]
+assert(len(lst) == 5)
+assert(lst[0] == 1)
+assert(lst[-1] == 5)
+lst.append(6)
+assert(len(lst) == 6)
+sl = lst[1:4]
+assert(len(sl) == 3)
+assert(sl[0] == 2)
+
+lst2 = [5، 3، 1، 4، 2]
+lst2 = sorted(lst2)
+assert(lst2[0] == 1)
+assert(lst2[4] == 5)
+
+rev = reversed([1، 2، 3])
+assert(rev[0] == 3)
+assert(rev[2] == 1)
+
+lst3 = [10، 20، 30]
+assert(max(lst3) == 30)
+assert(min(lst3) == 10)
+assert(sum(lst3) == 60)
+
+print("4. Lists OK")

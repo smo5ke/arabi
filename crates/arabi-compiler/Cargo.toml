@@ -1,0 +1,15 @@
+[package]
+name = "arabi-compiler"
+description = "Bytecode compiler for the Arabi programming language"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+arabi-core.workspace = true
+arabi-parser.workspace = true
+arabi-lexer.workspace = true
+thiserror.workspace = true
+

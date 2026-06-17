@@ -1,0 +1,33 @@
+v = 15
+if v > 20:
+    r = "big"
+elif v > 10:
+    r = "mid"
+else:
+    r = "small"
+assert(r == "mid")
+
+s = 0
+total = 0
+while s < 10:
+    total += s
+    s += 1
+assert(total == 45)
+
+total2 = 0
+for i in range(5):
+    total2 += i
+assert(total2 == 10)
+
+s2 = 0
+for i in range(10):
+    if i % 2 == 0:
+        continue
+    s2 += i
+assert(s2 == 25)
+
+n = 10
+result = "big" if n > 5 else "small"
+assert(result == "big")
+
+print("5. Control Flow OK")
