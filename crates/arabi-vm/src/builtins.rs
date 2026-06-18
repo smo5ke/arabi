@@ -182,6 +182,15 @@ pub fn call_native(name: &str, args: &[Value], kwargs: &[(String, Value)], vm: &
         }
         "منطق" => {
             let obj = args.first().ok_or_else(|| RuntimeError::new("منطق يتطلب معامل واحد"))?;
+            if let Value::Instance(rc) = obj {
+                if let Some(method) = rc.class.methods.get("__منطقي__").cloned() {
+                    match method.call(&[obj.clone()], &[], vm, module) {
+                        Ok(Value::Boolean(b)) => return Ok(Value::Boolean(b)),
+                        Ok(v) => return Ok(Value::Boolean(v.is_truthy())),
+                        Err(_) => {}
+                    }
+                }
+            }
             Ok(Value::Boolean(obj.is_truthy()))
         }
         "نص" => {

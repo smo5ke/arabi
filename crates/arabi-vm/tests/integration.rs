@@ -1,4 +1,4 @@
-use arabi_lexer::Lexer;
+﻿use arabi_lexer::Lexer;
 use arabi_parser::Parser;
 use arabi_compiler::Compiler;
 use arabi_vm::VM;
@@ -1953,4 +1953,77 @@ fn test_157_type_check_wrappers() {
     assert_eq!(r.globals.get("ن6"), Some(&Value::Boolean(false)));
     assert_eq!(r.globals.get("ن7"), Some(&Value::Boolean(true)));
     assert_eq!(r.globals.get("ن8"), Some(&Value::Boolean(false)));
+}
+
+#[test]
+fn test_158_dunder_getitem() {
+    let source = r#"صنف مصفوفة:
+    دالة __تهيئة__(هذا، عناصر):
+        هذا.العناصر = عناصر
+    دالة __احصل_على_عنصر__(هذا، فهرس):
+        ارجع هذا.العناصر[فهرس]
+
+م = مصفوفة([10، 20، 30])
+ن1 = م[0]
+ن2 = م[2]
+"#;
+    let r = run_arabi(source).unwrap();
+    assert_eq!(r.globals.get("ن1"), Some(&Value::Integer(10)));
+    assert_eq!(r.globals.get("ن2"), Some(&Value::Integer(30)));
+}
+
+#[test]
+fn test_159_dunder_setitem() {
+    let source = r#"صنف مصفوفة:
+    دالة __تهيئة__(هذا، عناصر):
+        هذا.العناصر = عناصر
+    دالة __احصل_على_عنصر__(هذا، فهرس):
+        ارجع هذا.العناصر[فهرس]
+    دالة __حدد_عنصر__(هذا، فهرس، قيمة):
+        قائمة = هذا.العناصر
+        قائمة[فهرس] = قيمة
+
+م = مصفوفة([10، 20، 30])
+م[1] = 99
+ن = م[1]
+"#;
+    let r = run_arabi(source).unwrap();
+    assert_eq!(r.globals.get("ن"), Some(&Value::Integer(99)));
+}
+
+#[test]
+fn test_160_super_basic() {
+    let source = r#"صنف حيوان:
+    دالة __تهيئة__(هذا، اسم):
+        هذا.اسم = اسم
+    دالة صوت(هذا):
+        ارجع هذا.اسم + ": ..."
+
+صنف كلب(حيوان):
+    دالة صوت(هذا):
+        ارجع هذا.اسم + ": واف!"
+
+ك = كلب("بودي")
+ن = ك.صوت()
+"#;
+    let r = run_arabi(source).unwrap();
+    assert_eq!(r.globals.get("ن"), Some(&Value::String(Rc::new("بودي: واف!".to_string()))));
+}
+
+#[test]
+fn test_161_dunder_bool() {
+    let source = r#"صنف عداد:
+    دالة __تهيئة__(هذا، قيمة):
+        هذا.القيمة = قيمة
+    دالة __منطقي__(هذا):
+        ارجع هذا.القيمة > 0
+
+صفر = عداد(0)
+موجب = عداد(5)
+ن1 = منطق(صفر)
+ن2 = منطق(موجب)
+"#;
+    let r = run_arabi(source).unwrap();
+    assert_eq!(r.globals.get("ن1"), Some(&Value::Boolean(false)));
+    assert_eq!(r.globals.get("ن2"), Some(&Value::Boolean(true)));
 }

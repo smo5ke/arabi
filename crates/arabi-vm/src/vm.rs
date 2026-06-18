@@ -2699,7 +2699,20 @@ impl VM {
                                 runtime_error!("استثناء_مفتاح", "مفتاح غير موجود".to_string());
                             }
                         }
-                        _ => runtime_error!("استثناء_نوع", "غير قادر على الوصول بالفهرس".to_string()),
+                        _ => {
+                            if let Value::Instance(rc) = &obj {
+                                if let Some(method) = rc.class.methods.get("__احصل_على_عنصر__").cloned() {
+                                    match method.call(&[obj.clone(), index], &[], self, module) {
+                                        Ok(v) => hot_push!(v),
+                                        Err(e) => { runtime_error!("استثناء_نوع", e.to_string()); }
+                                    }
+                                } else {
+                                    runtime_error!("استثناء_نوع", "غير قادر على الوصول بالفهرس".to_string());
+                                }
+                            } else {
+                                runtime_error!("استثناء_نوع", "غير قادر على الوصول بالفهرس".to_string());
+                            }
+                        }
                     }
                 }
                 OP_STORE_SUBSCRIPT => {
@@ -2719,7 +2732,17 @@ impl VM {
                         (Value::Dict(pairs), _key) => {
                             pairs.insert(index, value);
                         }
-                        _ => runtime_error!("استثناء_نوع", "غير قادر على التخزين بالفهرس".to_string()),
+                        _ => {
+                            if let Value::Instance(rc) = &mut obj {
+                                if let Some(method) = rc.class.methods.get("__حدد_عنصر__").cloned() {
+                                    let _ = method.call(&[obj.clone(), index, value], &[], self, module);
+                                } else {
+                                    runtime_error!("استثناء_نوع", "غير قادر على التخزين بالفهرس".to_string());
+                                }
+                            } else {
+                                runtime_error!("استثناء_نوع", "غير قادر على التخزين بالفهرس".to_string());
+                            }
+                        }
                     }
                     hot_push!(obj);
                 }
@@ -3117,7 +3140,20 @@ impl VM {
                                         runtime_error!("استثناء_نطاق", "فهرس خارج النطاق".to_string());
                                     }
                                 }
-                                _ => runtime_error!("استثناء_نوع", "غير قادر على الوصول بالفهرس".to_string()),
+                        _ => {
+                            if let Value::Instance(rc) = list {
+                                if let Some(method) = rc.class.methods.get("__احصل_على_عنصر__").cloned() {
+                                    match method.call(&[list.clone(), idx_val.clone()], &[], self, module) {
+                                        Ok(v) => hot_push!(v),
+                                        Err(e) => { runtime_error!("استثناء_نوع", e.to_string()); }
+                                    }
+                                } else {
+                                    runtime_error!("استثناء_نوع", "غير قادر على الوصول بالفهرس".to_string());
+                                }
+                            } else {
+                                runtime_error!("استثناء_نوع", "غير قادر على الوصول بالفهرس".to_string());
+                            }
+                        }
                             }
                         }
                     }
@@ -3163,16 +3199,26 @@ impl VM {
                         if list_local < locals_len && idx_local < locals_len {
                             let list = &mut *locals_ptr.add(list_local);
                             let idx_val = &*locals_ptr.add(idx_local);
-                            if let (Value::List(items), Value::Integer(i)) = (list, idx_val) {
-                                let len = items.len();
-                                let idx = if *i < 0 { len as i64 + i } else { *i } as usize;
-                                if idx < len {
-                                    items.set_unchecked(idx, value);
-                                } else {
-                                    runtime_error!("استثناء_نطاق", "فهرس خارج النطاق".to_string());
+                            match (&mut *list, idx_val) {
+                                (Value::List(items), Value::Integer(i)) => {
+                                    let len = items.len();
+                                    let idx = if *i < 0 { len as i64 + i } else { *i } as usize;
+                                    if idx < len {
+                                        items.set_unchecked(idx, value);
+                                    } else {
+                                        runtime_error!("استثناء_نطاق", "فهرس خارج النطاق".to_string());
+                                    }
                                 }
-                            } else {
-                                runtime_error!("استثناء_نوع", "غير قادر على التخزين بالفهرس".to_string());
+                                (Value::Instance(rc), _) => {
+                                    if let Some(method) = rc.class.methods.get("__حدد_عنصر__").cloned() {
+                                        let _ = method.call(&[list.clone(), idx_val.clone(), value], &[], self, module);
+                                    } else {
+                                        runtime_error!("استثناء_نوع", "غير قادر على التخزين بالفهرس".to_string());
+                                    }
+                                }
+                                _ => {
+                                    runtime_error!("استثناء_نوع", "غير قادر على التخزين بالفهرس".to_string());
+                                }
                             }
                         }
                     }

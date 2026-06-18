@@ -369,9 +369,27 @@ impl Compiler {
         }
 
         // Pass 12: Fuse LoadFast + LoadFast + StoreSubscript → StoreSubscriptLocal
+        // 4-instruction: LoadFast(obj) + LoadFast(idx) + LoadFast(val) + StoreSubscript
+        //   → Nop + Nop + LoadFast(val) + StoreSubscriptLocal(obj, idx)
+        // 3-instruction: LoadFast(obj) + LoadFast(idx) + StoreSubscript
+        //   → StoreSubscriptLocal(obj, idx) + Nop + Nop
         let len = self.instructions.len();
         let mut i = 0;
         while i + 2 < len {
+            if i + 3 < len {
+                if let (Opcode::LoadFast(a), Opcode::LoadFast(b), Opcode::LoadFast(_c), Opcode::StoreSubscript) =
+                    (&self.instructions[i].opcode, &self.instructions[i + 1].opcode, &self.instructions[i + 2].opcode, &self.instructions[i + 3].opcode)
+                {
+                    let la = *a;
+                    let lb = *b;
+                    self.instructions[i].opcode = Opcode::Nop;
+                    self.instructions[i + 1].opcode = Opcode::Nop;
+                    // instructions[i+2] stays as LoadFast(_c) — pushes the value to stack
+                    self.instructions[i + 3].opcode = Opcode::StoreSubscriptLocal(la, lb);
+                    i += 4;
+                    continue;
+                }
+            }
             if let (Opcode::LoadFast(a), Opcode::LoadFast(b), Opcode::StoreSubscript) =
                 (&self.instructions[i].opcode, &self.instructions[i + 1].opcode, &self.instructions[i + 2].opcode)
             {
