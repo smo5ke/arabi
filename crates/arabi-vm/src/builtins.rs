@@ -1,6 +1,7 @@
 use crate::frame::{Value, SharedList, SharedDict, SharedSet, ExceptionData, RangeData};
 use crate::error::RuntimeError;
 use std::rc::Rc;
+use std::io::Read;
 
 fn vm_to_string(val: &Value, vm: &mut crate::vm::VM, module: &mut arabi_compiler::bytecode::BytecodeModule) -> String {
     if let Value::Instance(rc) = val {
@@ -3031,6 +3032,240 @@ pub fn call_native(name: &str, args: &[Value], kwargs: &[(String, Value)], vm: &
                 _ => return Err(RuntimeError::new_typed("استثناء_نوع", "اسم الخاصية يجب ان يكون نصاً")),
             };
             Ok(Value::Boolean(obj.get_attribute(&name_str).is_some()))
+        }
+
+        // === شبكة (Network/HTTP) module ===
+        "شبكة_جلب" | "شبكة_جلب_نص" => {
+            let url = args.first()
+                .ok_or_else(|| RuntimeError::new("شبكة.جلب يتطلب رابطاً"))?
+                .to_string_value();
+            match ureq::get(&url).call() {
+                Ok(resp) => {
+                    let status = resp.status();
+                    let mut body = String::new();
+                    resp.into_reader().read_to_string(&mut body).map_err(|e| {
+                        RuntimeError::new(format!("فشل قراءة الاستجابة: {}", e))
+                    })?;
+                    if name == "شبكة_جلب" {
+                        let dict_items = vec![
+                            (Value::String(Rc::new("الحالة".to_string())), Value::Integer(status as i64)),
+                            (Value::String(Rc::new("المحتوى".to_string())), Value::String(body.into())),
+                        ];
+                        Ok(Value::Dict(SharedDict::new(dict_items)))
+                    } else {
+                        Ok(Value::String(body.into()))
+                    }
+                }
+                Err(e) => Err(RuntimeError::new(format!("فشل الطلب: {}", e))),
+            }
+        }
+        "شبكة_جلب_كائن" => {
+            let url = args.first()
+                .ok_or_else(|| RuntimeError::new("شبكة.جلب_كائن يتطلب رابطاً"))?
+                .to_string_value();
+            match ureq::get(&url).call() {
+                Ok(resp) => {
+                    let mut body = String::new();
+                    resp.into_reader().read_to_string(&mut body).map_err(|e| {
+                        RuntimeError::new(format!("فشل قراءة الاستجابة: {}", e))
+                    })?;
+                    let json_val: serde_json::Value = serde_json::from_str(&body)
+                        .map_err(|e| RuntimeError::new(format!("فشل تحليل JSON: {}", e)))?;
+                    Ok(json_value_to_arabi(&json_val))
+                }
+                Err(e) => Err(RuntimeError::new(format!("فشل الطلب: {}", e))),
+            }
+        }
+        "شبكة_ارسل" => {
+            let url = args.first()
+                .ok_or_else(|| RuntimeError::new("شبكة.ارسل يتطلب رابطاً"))?
+                .to_string_value();
+            let body = args.get(1)
+                .map(|v| v.to_string_value())
+                .unwrap_or_default();
+            match ureq::post(&url).send_string(&body) {
+                Ok(resp) => {
+                    let status = resp.status();
+                    let mut resp_body = String::new();
+                    resp.into_reader().read_to_string(&mut resp_body).map_err(|e| {
+                        RuntimeError::new(format!("فشل قراءة الاستجابة: {}", e))
+                    })?;
+                    let dict_items = vec![
+                        (Value::String(Rc::new("الحالة".to_string())), Value::Integer(status as i64)),
+                        (Value::String(Rc::new("المحتوى".to_string())), Value::String(resp_body.into())),
+                    ];
+                    Ok(Value::Dict(SharedDict::new(dict_items)))
+                }
+                Err(e) => Err(RuntimeError::new(format!("فشل الارسال: {}", e))),
+            }
+        }
+        "شبكة_ارسل_كائن" => {
+            let url = args.first()
+                .ok_or_else(|| RuntimeError::new("شبكة.ارسل_كائن يتطلب رابطاً"))?
+                .to_string_value();
+            let json_val = args.get(1)
+                .ok_or_else(|| RuntimeError::new("شبكة.ارسل_كائن يتطلب كائناً"))?;
+            let json_str = arabi_value_to_json(json_val)
+                .map_err(|e| RuntimeError::new(format!("فشل تحويل القيمة لـ JSON: {}", e)))?;
+            let body = serde_json::to_string(&json_str)
+                .map_err(|e| RuntimeError::new(format!("فشل تحويل JSON لنص: {}", e)))?;
+            match ureq::post(&url)
+                .set("Content-Type", "application/json")
+                .send_string(&body)
+            {
+                Ok(resp) => {
+                    let status = resp.status();
+                    let mut resp_body = String::new();
+                    resp.into_reader().read_to_string(&mut resp_body).map_err(|e| {
+                        RuntimeError::new(format!("فشل قراءة الاستجابة: {}", e))
+                    })?;
+                    let resp_json: serde_json::Value = serde_json::from_str(&resp_body)
+                        .unwrap_or(serde_json::Value::String(resp_body.clone()));
+                    let dict_items = vec![
+                        (Value::String(Rc::new("الحالة".to_string())), Value::Integer(status as i64)),
+                        (Value::String(Rc::new("المحتوى".to_string())), json_value_to_arabi(&resp_json)),
+                    ];
+                    Ok(Value::Dict(SharedDict::new(dict_items)))
+                }
+                Err(e) => Err(RuntimeError::new(format!("فشل الارسال: {}", e))),
+            }
+        }
+        "شبكة_طلب" => {
+            let method = args.first()
+                .ok_or_else(|| RuntimeError::new("شبكة.طلب يتطلب طريقة"))?
+                .to_string_value().to_uppercase();
+            let url = args.get(1)
+                .ok_or_else(|| RuntimeError::new("شبكة.طلب يتطلب رابطاً"))?
+                .to_string_value();
+            let body = args.get(2)
+                .map(|v| v.to_string_value())
+                .unwrap_or_default();
+            let req = match method.as_str() {
+                "GET" => ureq::get(&url),
+                "POST" => ureq::post(&url),
+                "PUT" => ureq::put(&url),
+                "DELETE" => ureq::delete(&url),
+                "PATCH" => ureq::patch(&url),
+                _ => return Err(RuntimeError::new(format!("طريقة HTTP غير معروفة: {}", method))),
+            };
+            match req.send_string(&body) {
+                Ok(resp) => {
+                    let status = resp.status();
+                    let mut resp_body = String::new();
+                    resp.into_reader().read_to_string(&mut resp_body).map_err(|e| {
+                        RuntimeError::new(format!("فشل قراءة الاستجابة: {}", e))
+                    })?;
+                    let dict_items = vec![
+                        (Value::String(Rc::new("الحالة".to_string())), Value::Integer(status as i64)),
+                        (Value::String(Rc::new("المحتوى".to_string())), Value::String(resp_body.into())),
+                    ];
+                    Ok(Value::Dict(SharedDict::new(dict_items)))
+                }
+                Err(e) => Err(RuntimeError::new(format!("فشل الطلب: {}", e))),
+            }
+        }
+
+        // === عمليات (Subprocess) module ===
+        "عمليات_نفاذ" => {
+            let cmd = args.first()
+                .ok_or_else(|| RuntimeError::new("عمليات.نفاذ يتطلب امراً"))?
+                .to_string_value();
+            let output = if cfg!(windows) {
+                std::process::Command::new("cmd")
+                    .arg("/C")
+                    .arg(&cmd)
+                    .output()
+            } else {
+                std::process::Command::new("sh")
+                    .arg("-c")
+                    .arg(&cmd)
+                    .output()
+            }.map_err(|e| RuntimeError::new(format!("فشل تنفيذ الأمر '{}': {}", cmd, e)))?;
+            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            let code = output.status.code().unwrap_or(-1);
+            let dict_items = vec![
+                (Value::String(Rc::new("المخرجات".to_string())), Value::String(stdout.into())),
+                (Value::String(Rc::new("الاخطاء".to_string())), Value::String(stderr.into())),
+                (Value::String(Rc::new("الحالة".to_string())), Value::Integer(code as i64)),
+            ];
+            Ok(Value::Dict(SharedDict::new(dict_items)))
+        }
+        "عمليات_نفاذ_مع" => {
+            let cmd = args.first()
+                .ok_or_else(|| RuntimeError::new("عمليات.نفاذ_مع يتطلب امراً"))?
+                .to_string_value();
+            let input = args.get(1)
+                .map(|v| v.to_string_value())
+                .unwrap_or_default();
+            use std::io::Write;
+            let mut child = if cfg!(windows) {
+                std::process::Command::new("cmd")
+                    .arg("/C")
+                    .arg(&cmd)
+                    .stdin(std::process::Stdio::piped())
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::piped())
+                    .spawn()
+            } else {
+                std::process::Command::new("sh")
+                    .arg("-c")
+                    .arg(&cmd)
+                    .stdin(std::process::Stdio::piped())
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::piped())
+                    .spawn()
+            }.map_err(|e| RuntimeError::new(format!("فشل تنفيذ الأمر '{}': {}", cmd, e)))?;
+            if let Some(mut stdin) = child.stdin.take() {
+                stdin.write_all(input.as_bytes()).map_err(|e| {
+                    RuntimeError::new(format!("فشل كتابة المدخلات: {}", e))
+                })?;
+            }
+            let output = child.wait_with_output()
+                .map_err(|e| RuntimeError::new(format!("فشل انتظار الأمر: {}", e)))?;
+            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            let code = output.status.code().unwrap_or(-1);
+            let dict_items = vec![
+                (Value::String(Rc::new("المخرجات".to_string())), Value::String(stdout.into())),
+                (Value::String(Rc::new("الاخطاء".to_string())), Value::String(stderr.into())),
+                (Value::String(Rc::new("الحالة".to_string())), Value::Integer(code as i64)),
+            ];
+            Ok(Value::Dict(SharedDict::new(dict_items)))
+        }
+        "عمليات_نفاذ_قائمة" => {
+            let cmds_val = args.first()
+                .ok_or_else(|| RuntimeError::new("عمليات.نفاذ_قائمة تتطلب قائمة امروات"))?;
+            let cmds = match cmds_val {
+                Value::List(l) => l,
+                _ => return Err(RuntimeError::new_typed("استثناء_نوع", "المعامل يجب ان يكون قائمة")),
+            };
+            let mut results = Vec::new();
+            let borrowed = cmds.borrow();
+            for cmd_val in borrowed.iter() {
+                let cmd = cmd_val.to_string_value();
+                let output = if cfg!(windows) {
+                    std::process::Command::new("cmd")
+                        .arg("/C")
+                        .arg(&cmd)
+                        .output()
+                } else {
+                    std::process::Command::new("sh")
+                        .arg("-c")
+                        .arg(&cmd)
+                        .output()
+                }.map_err(|e| RuntimeError::new(format!("فشل تنفيذ الأمر '{}': {}", cmd, e)))?;
+                let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                let code = output.status.code().unwrap_or(-1);
+                let dict_items = vec![
+                    (Value::String(Rc::new("المخرجات".to_string())), Value::String(stdout.into())),
+                    (Value::String(Rc::new("الاخطاء".to_string())), Value::String(stderr.into())),
+                    (Value::String(Rc::new("الحالة".to_string())), Value::Integer(code as i64)),
+                ];
+                results.push(Value::Dict(SharedDict::new(dict_items)));
+            }
+            Ok(Value::List(SharedList::new(results)))
         }
 
         _ => Err(RuntimeError::new_typed("استثناء_اسم", format!("الدالة النظامية '{}' غير موجودة", name))),

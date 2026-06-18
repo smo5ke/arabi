@@ -961,8 +961,8 @@ impl VM {
                                             new_str.push_str(&right_str);
                                             *slot = Value::String(Rc::new(new_str));
                                         }
-                                    }
-                                    _ => {
+                        }
+                        _ => {
                                         let old = std::mem::replace(slot, Value::Null);
                                         let left_str = old.to_string_value();
                                         *slot = Value::String(Rc::new(format!("{}{}", left_str, right_str)));
@@ -4915,6 +4915,47 @@ if let Value::Instance(rc) = &val {
                                 ("جميع", "نمط_جميع"), ("كل_التطابقات", "نمط_كل_التطابقات"),
                             ];
                             for (name, fn_name) in regex_fns {
+                                methods.insert(name.to_string(), Value::NativeFunction(Rc::new(NativeFunctionData { name: fn_name.to_string(), arity: 0 })));
+                            }
+                            Value::Class(Rc::new(ClassData {
+                                name: Rc::from(root_name.as_str()),
+                                methods: Rc::new(methods),
+                                fields: HashMap::new(),
+                                parents: Vec::new(),
+                                field_names: Vec::new(),
+                                field_index: Rc::new(HashMap::new()),
+                            }))
+                        }
+                        "شبكة" => {
+                            let mut methods = HashMap::new();
+                            let net_fns = vec![
+                                ("جلب", "شبكة_جلب"),
+                                ("جلب_نص", "شبكة_جلب_نص"),
+                                ("جلب_كائن", "شبكة_جلب_كائن"),
+                                ("ارسل", "شبكة_ارسل"),
+                                ("ارسل_كائن", "شبكة_ارسل_كائن"),
+                                ("طلب", "شبكة_طلب"),
+                            ];
+                            for (name, fn_name) in net_fns {
+                                methods.insert(name.to_string(), Value::NativeFunction(Rc::new(NativeFunctionData { name: fn_name.to_string(), arity: 0 })));
+                            }
+                            Value::Class(Rc::new(ClassData {
+                                name: Rc::from(root_name.as_str()),
+                                methods: Rc::new(methods),
+                                fields: HashMap::new(),
+                                parents: Vec::new(),
+                                field_names: Vec::new(),
+                                field_index: Rc::new(HashMap::new()),
+                            }))
+                        }
+                        "عمليات" => {
+                            let mut methods = HashMap::new();
+                            let proc_fns = vec![
+                                ("نفاذ", "عمليات_نفاذ"),
+                                ("نفاذ_مع", "عمليات_نفاذ_مع"),
+                                ("نفاذ_قائمة", "عمليات_نفاذ_قائمة"),
+                            ];
+                            for (name, fn_name) in proc_fns {
                                 methods.insert(name.to_string(), Value::NativeFunction(Rc::new(NativeFunctionData { name: fn_name.to_string(), arity: 0 })));
                             }
                             Value::Class(Rc::new(ClassData {

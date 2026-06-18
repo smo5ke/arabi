@@ -1548,3 +1548,67 @@ fn test_128_dot_attr_access() {
     let r = run_arabi(source).unwrap();
     assert_eq!(r.globals.get("الناتج"), Some(&Value::Integer(100)));
 }
+
+#[test]
+fn test_129_subprocess_run() {
+    let source = r#"
+استورد عمليات
+ن = عمليات.نفاذ("echo hello")
+الناتج = ن["المخرجات"]
+"#;
+    let r = run_arabi(source).unwrap();
+    match r.globals.get("الناتج") {
+        Some(Value::String(s)) => assert!(s.trim().contains("hello")),
+        other => panic!("Expected string containing 'hello', got {:?}", other),
+    }
+}
+
+#[test]
+fn test_130_subprocess_run_with_stdin() {
+    let source = r#"
+استورد عمليات
+ن = عمليات.نفاذ_مع("more", "مرحبا")
+الناتج = ن["المخرجات"]
+"#;
+    let r = run_arabi(source).unwrap();
+    match r.globals.get("الناتج") {
+        Some(Value::String(s)) => assert!(s.contains("مرحبا")),
+        other => panic!("Expected string containing 'مرحبا', got {:?}", other),
+    }
+}
+
+#[test]
+fn test_131_subprocess_exit_code() {
+    let source = r#"
+استورد عمليات
+ن = عمليات.نفاذ("exit /b 42")
+الناتج = ن["الحالة"]
+"#;
+    let r = run_arabi(source).unwrap();
+    assert_eq!(r.globals.get("الناتج"), Some(&Value::Integer(42)));
+}
+
+#[test]
+fn test_132_subprocess_stderr() {
+    let source = r#"
+استورد عمليات
+ن = عمليات.نفاذ("echo error 1>&2")
+الناتج = ن["الاخطاء"]
+"#;
+    let r = run_arabi(source).unwrap();
+    match r.globals.get("الناتج") {
+        Some(Value::String(s)) => assert!(s.contains("error")),
+        other => panic!("Expected string containing 'error', got {:?}", other),
+    }
+}
+
+#[test]
+fn test_133_subprocess_list() {
+    let source = r#"
+استورد عمليات
+ن = عمليات.نفاذ_قائمة(["echo one", "echo two"])
+العدد = طول(ن)
+"#;
+    let r = run_arabi(source).unwrap();
+    assert_eq!(r.globals.get("العدد"), Some(&Value::Integer(2)));
+}
