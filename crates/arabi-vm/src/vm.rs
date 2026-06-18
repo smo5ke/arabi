@@ -73,8 +73,10 @@ static BUILTIN_NAMES: LazyLock<std::collections::HashSet<&'static str>> = LazyLo
         "مجموع_مربعات", "متوسط_وزني",
         "اختيار", "عينة", "خلط", "طبيعي", "برنولي", "عشوائي_نطاق", "جميل", "تحقق",
         "انضم", "مسار_مطلق", "نسخ", "نقل", "قائمة_مجلد", "مشي", "متغير_بيئي",
-        "احذف_عنصر", "احطظ", "ادخل_في", "احذف_قيمة", "اختزال", "نفذ", "اخرج",
+        "احذف_عنصر", "احطظ", "ادخل_في", "احذف_قيمة", "نفذ", "اخرج",
         "مسطح", "ضخم", "ادمج_فهرس_بـ", "تجميع", "عدد_تكرار", "تجزئة_قائمة", "افصل",
+        "خاصية", "تعيين_خاصية", "هل_خاصية", "الاصدار",
+        "صحيح؟", "عشري؟", "نص؟", "قائمة؟",
     ].iter().copied().collect()
 });
 
@@ -212,6 +214,7 @@ impl VM {
         let builtin_names_extra = vec![
             "مسطح", "ضخم", "ادمج_فهرس_بـ", "تجميع", "عدد_تكرار", "تجزئة_قائمة", "افصل",
             "خاصية", "تعيين_خاصية", "هل_خاصية",
+            "صحيح؟", "عشري؟", "نص؟", "قائمة؟",
         ];
         for name in builtin_names {
             self.insert_global(
@@ -231,6 +234,10 @@ impl VM {
                 })),
             );
         }
+        self.insert_global(
+            "الاصدار".to_string(),
+            Value::String(Rc::new("0.1.0".to_string())),
+        );
     }
 
     fn init_exception_hierarchy(&mut self) {
@@ -1663,8 +1670,7 @@ impl VM {
                                             unsafe { crate::jit_runtime::clear_jit_context(); }
                                             r
                                         };
-                                        if self.current_exception.is_some() {
-                                            let exc = self.current_exception.take().expect("Exception handler entered without pending exception");
+                                        if let Some(exc) = self.current_exception.take() {
                                             if let Value::Exception(ref e) = exc {
                                                 return Err(RuntimeError::new_typed(&e.class_name, &e.message).with_line(e.line.unwrap_or(0)));
                                             }
@@ -1839,8 +1845,7 @@ impl VM {
                                             unsafe { crate::jit_runtime::clear_jit_context(); }
                                             r
                                         };
-                                        if self.current_exception.is_some() {
-                                            let exc = self.current_exception.take().expect("Exception handler entered without pending exception");
+                                        if let Some(exc) = self.current_exception.take() {
                                             if let Value::Exception(ref e) = exc {
                                                 return Err(RuntimeError::new_typed(&e.class_name, &e.message).with_line(e.line.unwrap_or(0)));
                                             }
@@ -1966,8 +1971,7 @@ impl VM {
                                             unsafe { crate::jit_runtime::clear_jit_context(); }
                                             r
                                         };
-                                        if self.current_exception.is_some() {
-                                            let exc = self.current_exception.take().expect("Exception handler entered without pending exception");
+                                        if let Some(exc) = self.current_exception.take() {
                                             if let Value::Exception(ref e) = exc {
                                                 return Err(RuntimeError::new_typed(&e.class_name, &e.message).with_line(e.line.unwrap_or(0)));
                                             }

@@ -2,7 +2,7 @@ use arabi_lexer::Lexer;
 use arabi_parser::Parser;
 use arabi_compiler::Compiler;
 use arabi_vm::VM;
-use arabi_vm::frame::{Value, SharedList};
+use arabi_vm::{Value, SharedList};
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -1923,4 +1923,34 @@ fn test_155_class_inheritance_method_override() {
     assert_eq!(r.globals.get("ن1"), Some(&Value::String(Rc::new("بودي: واف!".to_string()))));
     assert_eq!(r.globals.get("ن2"), Some(&Value::String(Rc::new("ميوي: نياو!".to_string()))));
     assert_eq!(r.globals.get("ن3"), Some(&Value::String(Rc::new("...".to_string()))));
+}
+
+#[test]
+fn test_156_version_constant() {
+    let source = r#"الناتج = الاصدار"#;
+    let r = run_arabi(source).unwrap();
+    assert_eq!(r.globals.get("الناتج"), Some(&Value::String(Rc::new("0.1.0".to_string()))));
+}
+
+#[test]
+fn test_157_type_check_wrappers() {
+    let source = r#"
+ن1 = صحيح؟(42)
+ن2 = صحيح؟("نص")
+ن3 = عشري؟(3.14)
+ن4 = عشري؟(42)
+ن5 = نص؟("مرحبا")
+ن6 = نص؟(123)
+ن7 = قائمة؟([1، 2، 3])
+ن8 = قائمة؟("قائمة")
+"#;
+    let r = run_arabi(source).unwrap();
+    assert_eq!(r.globals.get("ن1"), Some(&Value::Boolean(true)));
+    assert_eq!(r.globals.get("ن2"), Some(&Value::Boolean(false)));
+    assert_eq!(r.globals.get("ن3"), Some(&Value::Boolean(true)));
+    assert_eq!(r.globals.get("ن4"), Some(&Value::Boolean(false)));
+    assert_eq!(r.globals.get("ن5"), Some(&Value::Boolean(true)));
+    assert_eq!(r.globals.get("ن6"), Some(&Value::Boolean(false)));
+    assert_eq!(r.globals.get("ن7"), Some(&Value::Boolean(true)));
+    assert_eq!(r.globals.get("ن8"), Some(&Value::Boolean(false)));
 }

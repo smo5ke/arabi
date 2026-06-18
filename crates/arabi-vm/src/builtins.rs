@@ -1,4 +1,4 @@
-use crate::frame::{Value, SharedList, SharedDict, SharedSet, ExceptionData, RangeData};
+﻿use crate::frame::{Value, SharedList, SharedDict, SharedSet, ExceptionData, RangeData};
 use crate::error::RuntimeError;
 use std::rc::Rc;
 use std::io::Read;
@@ -439,6 +439,22 @@ pub fn call_native(name: &str, args: &[Value], kwargs: &[(String, Value)], vm: &
         "نوع" => {
             let obj = args.first().ok_or_else(|| RuntimeError::new("نوع يتطلب معامل واحد"))?;
             Ok(Value::String(obj.type_name().to_string().into()))
+        }
+        "صحيح؟" => {
+            let obj = args.first().ok_or_else(|| RuntimeError::new("صحيح؟ يتطلب معامل واحد"))?;
+            Ok(Value::Boolean(matches!(obj, Value::Integer(_))))
+        }
+        "عشري؟" => {
+            let obj = args.first().ok_or_else(|| RuntimeError::new("عشري؟ يتطلب معامل واحد"))?;
+            Ok(Value::Boolean(matches!(obj, Value::Float(_))))
+        }
+        "نص؟" => {
+            let obj = args.first().ok_or_else(|| RuntimeError::new("نص؟ يتطلب معامل واحد"))?;
+            Ok(Value::Boolean(matches!(obj, Value::String(_))))
+        }
+        "قائمة؟" => {
+            let obj = args.first().ok_or_else(|| RuntimeError::new("قائمة؟ يتطلب معامل واحد"))?;
+            Ok(Value::Boolean(matches!(obj, Value::List(_))))
         }
         "معكوس" => {
             let obj = args.first().ok_or_else(|| RuntimeError::new("معكوس يتطلب معامل واحد"))?;
