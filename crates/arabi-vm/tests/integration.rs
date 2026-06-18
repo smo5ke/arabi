@@ -1612,3 +1612,138 @@ fn test_133_subprocess_list() {
     let r = run_arabi(source).unwrap();
     assert_eq!(r.globals.get("العدد"), Some(&Value::Integer(2)));
 }
+
+#[test]
+fn test_134_while_else() {
+    let source = r#"
+الناتج = 0
+ن = 0
+بينما ن < 5:
+    الناتج = الناتج + ن
+    ن = ن + 1
+والا:
+    الناتج = الناتج + 100
+"#;
+    let r = run_arabi(source).unwrap();
+    assert_eq!(r.globals.get("الناتج"), Some(&Value::Integer(110)));
+}
+
+#[test]
+fn test_135_while_else_continue() {
+    let source = r#"
+الناتج = 0
+ن = 0
+بينما ن < 5:
+    ن = ن + 1
+    اذا ن % 2 == 0:
+        استمر
+    الناتج = الناتج + ن
+والا:
+    الناتج = الناتج + 100
+"#;
+    let r = run_arabi(source).unwrap();
+    assert_eq!(r.globals.get("الناتج"), Some(&Value::Integer(109)));
+}
+
+#[test]
+fn test_136_for_else() {
+    let source = r#"
+الناتج = 0
+لكل ن في [1، 2، 3]:
+    الناتج = الناتج + ن
+والا:
+    الناتج = الناتج + 100
+"#;
+    let r = run_arabi(source).unwrap();
+    assert_eq!(r.globals.get("الناتج"), Some(&Value::Integer(106)));
+}
+
+#[test]
+fn test_137_for_else_continue() {
+    let source = r#"
+الناتج = 0
+لكل ن في [1، 2، 3، 4، 5]:
+    اذا ن % 2 == 0:
+        استمر
+    الناتج = الناتج + ن
+والا:
+    الناتج = الناتج + 100
+"#;
+    let r = run_arabi(source).unwrap();
+    assert_eq!(r.globals.get("الناتج"), Some(&Value::Integer(109)));
+}
+
+#[test]
+fn test_138_raise_explicit() {
+    let source = r#"
+حاول:
+    ارم("خطأ مخصص")
+خلل بشرط م:
+    الناتج = "تم"
+"#;
+    let r = run_arabi(source).unwrap();
+    match r.globals.get("الناتج") {
+        Some(Value::String(s)) => assert_eq!(s.as_str(), "تم"),
+        other => panic!("Expected 'تم', got {:?}", other),
+    }
+}
+
+#[test]
+fn test_139_callable_magic() {
+    let source = r#"
+صنف مكالمة:
+    دالة __استدعاء__(هذا، م):
+        ارجع م * 2
+ن = مكالمة()
+الناتج = ن(5)
+"#;
+    let r = run_arabi(source).unwrap();
+    assert_eq!(r.globals.get("الناتج"), Some(&Value::Integer(10)));
+}
+
+#[test]
+fn test_140_json_analyze() {
+    let source = r#"
+استورد كائن
+الكائن = كائن.تحليل('{"الاسم": "أحمد"}')
+الاسم = الكائن["الاسم"]
+"#;
+    let r = run_arabi(source).unwrap();
+    match r.globals.get("الاسم") {
+        Some(Value::String(s)) => assert_eq!(s.as_str(), "أحمد"),
+        other => panic!("Expected 'أحمد', got {:?}", other),
+    }
+}
+
+#[test]
+fn test_141_json_convert() {
+    let source = r#"
+استورد كائن
+القائمة = [1، 2، 3]
+النص = كائن.تحويل(القائمة)
+"#;
+    let r = run_arabi(source).unwrap();
+    match r.globals.get("النص") {
+        Some(Value::String(s)) => assert!(s.contains("1"), "JSON should contain 1"),
+        other => panic!("Expected JSON string, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_142_context_manager() {
+    let source = r#"
+صنف سياق:
+    دالة __ادخل__(هذا):
+        هذا.الحالة = "داخل"
+        ارجع هذا
+    دالة __اترك__(هذا):
+        هذا.الحالة = "خارج"
+ن = سياق()
+باستخدام ن:
+    الناتج1 = ن.الحالة
+الناتج2 = ن.الحالة
+"#;
+    let r = run_arabi(source).unwrap();
+    assert_eq!(r.globals.get("الناتج1"), Some(&Value::String(Rc::new("داخل".to_string()))));
+    assert_eq!(r.globals.get("الناتج2"), Some(&Value::String(Rc::new("خارج".to_string()))));
+}
