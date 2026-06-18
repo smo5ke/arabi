@@ -82,7 +82,7 @@ pub enum Stmt {
     },
     Match {
         value: Expr,
-        cases: Vec<(Expr, Block)>,
+        cases: Vec<(Expr, Option<Expr>, Block)>,
         default: Option<Block>,
     },
 }

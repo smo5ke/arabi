@@ -2016,7 +2016,7 @@ impl Compiler {
                 let mut case_start_idxs = Vec::new();
                 let mut jump_end_idxs = Vec::new();
 
-                for (_i, (pattern, body)) in cases.iter().enumerate() {
+                for (_i, (pattern, guard, body)) in cases.iter().enumerate() {
                     // Record start of this case
                     case_start_idxs.push(self.instructions.len());
 
@@ -2030,6 +2030,14 @@ impl Compiler {
                     self.emit(Opcode::PopJumpIfFalse(0), 0);
                     jump_next_idxs.push(self.instructions.len() - 1);
 
+                    // If there's a guard, compile and check it
+                    if let Some(guard_expr) = guard {
+                        self.emit(Opcode::LoadFast(match_value_idx), 0);
+                        self.compile_expr(guard_expr)?;
+                        self.emit(Opcode::PopJumpIfFalse(0), 0);
+                        jump_next_idxs.push(self.instructions.len() - 1);
+                    }
+
                     // Compile body
                     for stmt in &body.stmts {
                         self.compile_stmt(stmt)?;
@@ -2040,16 +2048,27 @@ impl Compiler {
                     jump_end_idxs.push(self.instructions.len() - 1);
                 }
 
-                // Patch jump-next offsets: each PopJumpIfFalse jumps to the next case start
+                // Patch jump-next offsets
+                // Each case may produce 1 or 2 jumps (pattern + optional guard)
+                // All jumps from case i should target case_start_idxs[i+1]
                 let default_or_end = self.instructions.len();
-                for (i, &idx) in jump_next_idxs.iter().enumerate() {
-                    let target = if i + 1 < case_start_idxs.len() {
-                        case_start_idxs[i + 1]
+                let num_cases = cases.len();
+                let mut jump_idx = 0;
+                for case_i in 0..num_cases {
+                    let target = if case_i + 1 < num_cases {
+                        case_start_idxs[case_i + 1]
                     } else {
                         default_or_end
                     };
-                    if let Opcode::PopJumpIfFalse(ref mut offset) = self.instructions[idx].opcode {
-                        *offset = target - idx;
+                    let has_guard = cases[case_i].1.is_some();
+                    let num_jumps = if has_guard { 2 } else { 1 };
+                    for _ in 0..num_jumps {
+                        if let Some(&idx) = jump_next_idxs.get(jump_idx) {
+                            if let Opcode::PopJumpIfFalse(ref mut offset) = self.instructions[idx].opcode {
+                                *offset = target - idx;
+                            }
+                        }
+                        jump_idx += 1;
                     }
                 }
 

@@ -75,6 +75,7 @@ impl KeywordMap {
         map.insert("طابق", Keyword::Match);
         map.insert("حالة", Keyword::Case);
         map.insert("حالة_اخرى", Keyword::CaseDefault);
+        map.insert("عندما", Keyword::When);
 
         KeywordMap { map }
     }

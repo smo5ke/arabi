@@ -1194,9 +1194,15 @@ impl Parser {
             } else if self.check(&Token::Keyword(Keyword::Case)) {
                 self.advance(); // consume 'حالة'
                 let pattern = self.parse_expression()?;
+                let guard = if self.check(&Token::Keyword(Keyword::When)) {
+                    self.advance(); // consume 'عندما'
+                    Some(self.parse_expression()?)
+                } else {
+                    None
+                };
                 self.consume_delim(Delimiter::Colon)?;
                 let body = self.parse_block()?;
-                cases.push((pattern, body));
+                cases.push((pattern, guard, body));
             } else {
                 break;
             }

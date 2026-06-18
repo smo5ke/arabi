@@ -102,6 +102,7 @@ pub enum Keyword {
     Match,
     Case,
     CaseDefault,
+    When,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

@@ -1747,3 +1747,66 @@ fn test_142_context_manager() {
     assert_eq!(r.globals.get("الناتج1"), Some(&Value::String(Rc::new("داخل".to_string()))));
     assert_eq!(r.globals.get("الناتج2"), Some(&Value::String(Rc::new("خارج".to_string()))));
 }
+
+#[test]
+fn test_143_sorted_with_key() {
+    let source = r#"
+القائمة = [3، 1، 4، 1، 5]
+المرتب = مرتب(القائمة، خطية أ : -أ)
+الناتج = المرتب[0]
+"#;
+    let r = run_arabi(source).unwrap();
+    assert_eq!(r.globals.get("الناتج"), Some(&Value::Integer(5)));
+}
+
+#[test]
+fn test_144_max_with_key() {
+    let source = r#"
+القائمة = [3، 1، 4، 1، 5]
+الاكبر = اكبر(القائمة، خطية أ : أ * 2)
+"#;
+    let r = run_arabi(source).unwrap();
+    assert_eq!(r.globals.get("الاكبر"), Some(&Value::Integer(5)));
+}
+
+#[test]
+fn test_145_min_with_key() {
+    let source = r#"
+القائمة = [3، 1، 4، 1، 5]
+الاصغر = اصغر(القائمة، خطية أ : -أ)
+"#;
+    let r = run_arabi(source).unwrap();
+    assert_eq!(r.globals.get("الاصغر"), Some(&Value::Integer(5)));
+}
+
+#[test]
+fn test_146_match_guard() {
+    let source = r#"
+ن = 5
+طابق ن:
+    حالة 5 عندما ن > 10:
+        الناتج = "كبير"
+    حالة 5 عندما ن > 3:
+        الناتج = "متوسط"
+    حالة_اخرى:
+        الناتج = "صغير"
+"#;
+    let r = run_arabi(source).unwrap();
+    assert_eq!(r.globals.get("الناتج"), Some(&Value::String(Rc::new("متوسط".to_string()))));
+}
+
+#[test]
+fn test_147_match_guard_fallthrough() {
+    let source = r#"
+ن = 5
+طابق ن:
+    حالة 5 عندما ن > 10:
+        الناتج = "كبير"
+    حالة 5 عندما ن > 100:
+        الناتج = "متوسط جداً"
+    حالة_اخرى:
+        الناتج = "الاخرى"
+"#;
+    let r = run_arabi(source).unwrap();
+    assert_eq!(r.globals.get("الناتج"), Some(&Value::String(Rc::new("الاخرى".to_string()))));
+}

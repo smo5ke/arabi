@@ -263,6 +263,24 @@ pub fn call_native(name: &str, args: &[Value], kwargs: &[(String, Value)], vm: &
                     }
                     _ => Err(RuntimeError::new_typed("استثناء_نوع", "اكبر يتطلب قائمة")),
                 }
+            } else if args.len() == 2 {
+                let items = &args[0];
+                let key_func = &args[1];
+                let values: Vec<Value> = match items {
+                    Value::List(l) => l.borrow().clone(),
+                    Value::Tuple(t) => t.as_ref().clone(),
+                    _ => return Err(RuntimeError::new_typed("استثناء_نوع", "اكبر يتطلب قائمة")),
+                };
+                let mut max_item = values.first().ok_or_else(|| RuntimeError::new("القائمة فارغة"))?.clone();
+                let mut max_key = key_func.call(&[max_item.clone()], &[], vm, module)?;
+                for item in values.iter().skip(1) {
+                    let k = key_func.call(&[item.clone()], &[], vm, module)?;
+                    if k.partial_cmp(&max_key) == Some(std::cmp::Ordering::Greater) {
+                        max_key = k;
+                        max_item = item.clone();
+                    }
+                }
+                Ok(max_item)
             } else {
                 let mut max = args[0].clone();
                 for item in args.iter().skip(1) {
@@ -297,6 +315,24 @@ pub fn call_native(name: &str, args: &[Value], kwargs: &[(String, Value)], vm: &
                     }
                     _ => Err(RuntimeError::new_typed("استثناء_نوع", "اصغر يتطلب قائمة")),
                 }
+            } else if args.len() == 2 {
+                let items = &args[0];
+                let key_func = &args[1];
+                let values: Vec<Value> = match items {
+                    Value::List(l) => l.borrow().clone(),
+                    Value::Tuple(t) => t.as_ref().clone(),
+                    _ => return Err(RuntimeError::new_typed("استثناء_نوع", "اصغر يتطلب قائمة")),
+                };
+                let mut min_item = values.first().ok_or_else(|| RuntimeError::new("القائمة فارغة"))?.clone();
+                let mut min_key = key_func.call(&[min_item.clone()], &[], vm, module)?;
+                for item in values.iter().skip(1) {
+                    let k = key_func.call(&[item.clone()], &[], vm, module)?;
+                    if k.partial_cmp(&min_key) == Some(std::cmp::Ordering::Less) {
+                        min_key = k;
+                        min_item = item.clone();
+                    }
+                }
+                Ok(min_item)
             } else {
                 let mut min = args[0].clone();
                 for item in args.iter().skip(1) {
@@ -1420,15 +1456,32 @@ pub fn call_native(name: &str, args: &[Value], kwargs: &[(String, Value)], vm: &
 
         "مرتب" => {
             let obj = args.first().ok_or_else(|| RuntimeError::new("مرتب يتطلب معامل واحد"))?;
+            let key_func = if args.len() > 1 { Some(&args[1]) } else { None };
             match obj {
                 Value::List(items) => {
                     let mut sorted_items: Vec<Value> = items.borrow().clone();
-                    sorted_items.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                    if let Some(key) = key_func {
+                        sorted_items.sort_by(|a, b| {
+                            let ka = key.call(&[a.clone()], &[], vm, module).unwrap_or(Value::Null);
+                            let kb = key.call(&[b.clone()], &[], vm, module).unwrap_or(Value::Null);
+                            ka.partial_cmp(&kb).unwrap_or(std::cmp::Ordering::Equal)
+                        });
+                    } else {
+                        sorted_items.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                    }
                     Ok(Value::List(SharedList::new(sorted_items)))
                 }
                 Value::Tuple(items) => {
                     let mut sorted_items: Vec<Value> = items.as_ref().clone();
-                    sorted_items.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                    if let Some(key) = key_func {
+                        sorted_items.sort_by(|a, b| {
+                            let ka = key.call(&[a.clone()], &[], vm, module).unwrap_or(Value::Null);
+                            let kb = key.call(&[b.clone()], &[], vm, module).unwrap_or(Value::Null);
+                            ka.partial_cmp(&kb).unwrap_or(std::cmp::Ordering::Equal)
+                        });
+                    } else {
+                        sorted_items.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                    }
                     Ok(Value::List(SharedList::new(sorted_items)))
                 }
                 Value::String(s) => {
