@@ -1525,21 +1525,7 @@ impl VM {
                     let mut obj = hot_pop!();
                     if let Value::Instance(_) = &obj {
                         let name_str = module.names[b].clone();
-                        if !obj.set_attribute(name_str.clone(), value.clone()) {
-                            if let Value::Instance(rc) = &obj {
-                                if let Some(method) = rc.class.methods.get("__عيّن__").cloned() {
-                                    let name_val = Value::String(Rc::new(name_str));
-                                    match method.call(&[obj.clone(), name_val, value], &[], self, module) {
-                                        Ok(_) => {}
-                                        Err(e) => {
-                                            runtime_error!("استثناء_اسم", e.to_string());
-                                        }
-                                    }
-                                } else {
-                                    runtime_error!("استثناء_اسم", format!("لا يمكن تعيين الخاصية: {}", name_str));
-                                }
-                            }
-                        }
+                        obj.set_attribute(name_str, value);
                     } else {
                         let name_str = &module.names[b];
                         runtime_error!("استثناء_اسم", format!("لا يمكن تعيين الخاصية: {}", name_str));

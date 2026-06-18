@@ -7,11 +7,13 @@ use std::path::Path;
 pub fn read_source_file(path: &Path) -> Result<String, std::io::Error> {
     let raw = std::fs::read(path)?;
     if raw.len() >= 2 && raw[0] == 0xFF && raw[1] == 0xFE {
-        let (decoded, _, _) = encoding_rs::UTF_16LE.decode(&raw);
-        Ok(decoded.into_owned())
+        Ok(String::from_utf16_lossy(
+            &raw[2..].chunks(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect::<Vec<_>>()
+        ))
     } else if raw.len() >= 2 && raw[0] == 0xFE && raw[1] == 0xFF {
-        let (decoded, _, _) = encoding_rs::UTF_16BE.decode(&raw);
-        Ok(decoded.into_owned())
+        Ok(String::from_utf16_lossy(
+            &raw[2..].chunks(2).map(|c| u16::from_be_bytes([c[0], c[1]])).collect::<Vec<_>>()
+        ))
     } else if raw.len() >= 3 && raw[0] == 0xEF && raw[1] == 0xBB && raw[2] == 0xBF {
         Ok(String::from_utf8_lossy(&raw[3..]).into_owned())
     } else {
@@ -37,9 +39,17 @@ fn vm_to_string(val: &Value, vm: &mut crate::vm::VM, module: &mut arabi_compiler
     val.to_string_value()
 }
 
+#[cfg(feature = "random")]
 fn rand_random() -> f64 {
     use rand::Rng;
     rand::thread_rng().gen::<f64>()
+}
+
+#[cfg(not(feature = "random"))]
+fn rand_random() -> f64 {
+    static SEED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0x1234567890ABCDEF);
+    let old = SEED.fetch_add(6364136223846793005, std::sync::atomic::Ordering::Relaxed);
+    (old >> 11) as f64 / (1u64 << 53) as f64
 }
 
 pub fn call_native(name: &str, args: &[Value], kwargs: &[(String, Value)], vm: &mut crate::vm::VM, module: &mut arabi_compiler::bytecode::BytecodeModule) -> Result<Value, RuntimeError> {
