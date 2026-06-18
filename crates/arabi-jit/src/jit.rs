@@ -212,6 +212,9 @@ impl CraneliftJIT {
                 | OP_POP_JUMP_IF_FALSE | OP_SUBTRACT_LOCAL_IMM | OP_ADD_LOCAL_IMM
                 | OP_JUMP_FORWARD | OP_LOAD_TRUE | OP_LOAD_FALSE | OP_LOAD_NONE
                 | OP_MOD_JUMP_IF_NOT_ZERO
+                | OP_BINARY_BIT_AND | OP_BINARY_BIT_OR | OP_BINARY_BIT_XOR
+                | OP_BINARY_SHL | OP_BINARY_SHR | OP_UNARY_BIT_NOT
+                | OP_LOGICAL_AND | OP_LOGICAL_OR
                 | OP_FOR_RANGE | OP_JUMP_BACKWARD => { instruction_count += 1; }
                 _ => return false,
             }
@@ -777,6 +780,74 @@ fn emit_loop_bytecode(
                     let adjusted = bcx.ins().isub(q, one);
                     let result = bcx.ins().select(needs_adjust, adjusted, q);
                     stack.push(result);
+                    slot_map.push(None);
+                }
+            }
+            OP_BINARY_BIT_AND => {
+                if let (Some(right), Some(left)) = (stack.pop(), stack.pop()) {
+                    slot_map.pop(); slot_map.pop();
+                    stack.push(bcx.ins().band(left, right));
+                    slot_map.push(None);
+                }
+            }
+            OP_BINARY_BIT_OR => {
+                if let (Some(right), Some(left)) = (stack.pop(), stack.pop()) {
+                    slot_map.pop(); slot_map.pop();
+                    stack.push(bcx.ins().bor(left, right));
+                    slot_map.push(None);
+                }
+            }
+            OP_BINARY_BIT_XOR => {
+                if let (Some(right), Some(left)) = (stack.pop(), stack.pop()) {
+                    slot_map.pop(); slot_map.pop();
+                    stack.push(bcx.ins().bxor(left, right));
+                    slot_map.push(None);
+                }
+            }
+            OP_BINARY_SHL => {
+                if let (Some(right), Some(left)) = (stack.pop(), stack.pop()) {
+                    slot_map.pop(); slot_map.pop();
+                    let shift = bcx.ins().uextend(ty::I64, right);
+                    stack.push(bcx.ins().ishl(left, shift));
+                    slot_map.push(None);
+                }
+            }
+            OP_BINARY_SHR => {
+                if let (Some(right), Some(left)) = (stack.pop(), stack.pop()) {
+                    slot_map.pop(); slot_map.pop();
+                    let shift = bcx.ins().uextend(ty::I64, right);
+                    stack.push(bcx.ins().ushr(left, shift));
+                    slot_map.push(None);
+                }
+            }
+            OP_UNARY_BIT_NOT => {
+                if let Some(val) = stack.pop() {
+                    slot_map.pop();
+                    stack.push(bcx.ins().bnot(val));
+                    slot_map.push(None);
+                }
+            }
+            OP_LOGICAL_AND => {
+                if let (Some(right), Some(left)) = (stack.pop(), stack.pop()) {
+                    slot_map.pop(); slot_map.pop();
+                    let zero = bcx.ins().iconst(ty::I64, 0);
+                    let left_bool = bcx.ins().icmp(IntCC::NotEqual, left, zero);
+                    let right_bool = bcx.ins().icmp(IntCC::NotEqual, right, zero);
+                    let result = bcx.ins().band(left_bool, right_bool);
+                    let ext = bcx.ins().uextend(ty::I64, result);
+                    stack.push(ext);
+                    slot_map.push(None);
+                }
+            }
+            OP_LOGICAL_OR => {
+                if let (Some(right), Some(left)) = (stack.pop(), stack.pop()) {
+                    slot_map.pop(); slot_map.pop();
+                    let zero = bcx.ins().iconst(ty::I64, 0);
+                    let left_bool = bcx.ins().icmp(IntCC::NotEqual, left, zero);
+                    let right_bool = bcx.ins().icmp(IntCC::NotEqual, right, zero);
+                    let result = bcx.ins().bor(left_bool, right_bool);
+                    let ext = bcx.ins().uextend(ty::I64, result);
+                    stack.push(ext);
                     slot_map.push(None);
                 }
             }
