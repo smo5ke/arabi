@@ -1810,3 +1810,117 @@ fn test_147_match_guard_fallthrough() {
     let r = run_arabi(source).unwrap();
     assert_eq!(r.globals.get("الناتج"), Some(&Value::String(Rc::new("الاخرى".to_string()))));
 }
+
+#[test]
+fn test_148_negative_list_indexing() {
+    let source = r#"القائمة = [10، 20، 30، 40، 50]
+الاخير = القائمة[-1]
+الثالث = القائمة[-3]
+الاول = القائمة[-5]"#;
+    let r = run_arabi(source).unwrap();
+    assert_eq!(r.globals.get("الاخير"), Some(&Value::Integer(50)));
+    assert_eq!(r.globals.get("الثالث"), Some(&Value::Integer(30)));
+    assert_eq!(r.globals.get("الاول"), Some(&Value::Integer(10)));
+}
+
+#[test]
+fn test_149_negative_string_indexing() {
+    let source = r#"النص = "مرحبا"
+الاخير = النص[-1]
+الثالث = النص[-3]"#;
+    let r = run_arabi(source).unwrap();
+    assert_eq!(r.globals.get("الاخير"), Some(&Value::String(Rc::new("ا".to_string()))));
+    assert_eq!(r.globals.get("الثالث"), Some(&Value::String(Rc::new("ح".to_string()))));
+}
+
+#[test]
+fn test_150_string_slicing() {
+    let source = r#"النص = "مرحبا بالعالم"
+جزء1 = النص[0:5]
+جزء2 = النص[6:]
+جزء3 = النص[:5]"#;
+    let r = run_arabi(source).unwrap();
+    assert_eq!(r.globals.get("جزء1"), Some(&Value::String(Rc::new("مرحبا".to_string()))));
+    assert_eq!(r.globals.get("جزء2"), Some(&Value::String(Rc::new("بالعالم".to_string()))));
+    assert_eq!(r.globals.get("جزء3"), Some(&Value::String(Rc::new("مرحبا".to_string()))));
+}
+
+#[test]
+fn test_151_string_slicing_step() {
+    let source = r#"النص = "abcdef"
+جزء = النص[::2]"#;
+    let r = run_arabi(source).unwrap();
+    assert_eq!(r.globals.get("جزء"), Some(&Value::String(Rc::new("ace".to_string()))));
+}
+
+#[test]
+fn test_152_string_slicing_negative() {
+    let source = r#"النص = "مرحبا"
+جزء = النص[-3:]"#;
+    let r = run_arabi(source).unwrap();
+    assert_eq!(r.globals.get("جزء"), Some(&Value::String(Rc::new("حبا".to_string()))));
+}
+
+#[test]
+fn test_153_recursion_with_closure() {
+    let source = r#"دالة صانع_عداد(بداية):
+    عداد = بداية
+    دالة عدّ():
+        عداد = عداد + 1
+        ارجع عداد
+    ارجع عدّ
+
+العداد = صانع_عداد(0)
+ن1 = العداد()
+ن2 = العداد()
+ن3 = العداد()"#;
+    let r = run_arabi(source).unwrap();
+    assert_eq!(r.globals.get("ن1"), Some(&Value::Integer(1)));
+    assert_eq!(r.globals.get("ن2"), Some(&Value::Integer(2)));
+    assert_eq!(r.globals.get("ن3"), Some(&Value::Integer(3)));
+}
+
+#[test]
+fn test_154_class_composition() {
+    let source = r#"صنف نقطة:
+    دالة __تهيئة__(هذا، ص، خ):
+        هذا.ص = ص
+        هذا.خ = خ
+    دالة مسافة(هذا، ن):
+        ص2 = ن.ص - هذا.ص
+        خ2 = ن.خ - هذا.خ
+        ارجع ص2 * ص2 + خ2 * خ2
+
+ن1 = نقطة(0، 0)
+ن2 = نقطة(3، 4)
+الناتج = ن1.مسافة(ن2)"#;
+    let r = run_arabi(source).unwrap();
+    assert_eq!(r.globals.get("الناتج"), Some(&Value::Integer(25)));
+}
+
+#[test]
+fn test_155_class_inheritance_method_override() {
+    let source = r#"صنف حيوان:
+    دالة __تهيئة__(هذا، اسم):
+        هذا.اسم = اسم
+    دالة صوت(هذا):
+        ارجع "..."
+
+صنف كلب(حيوان):
+    دالة صوت(هذا):
+        ارجع هذا.اسم + ": واف!"
+
+صنف قط(حيوان):
+    دالة صوت(هذا):
+        ارجع هذا.اسم + ": نياو!"
+
+ك = كلب("بودي")
+ق = قط("ميوي")
+ن1 = ك.صوت()
+ن2 = ق.صوت()
+ن3 = حيوان("??").صوت()"#;
+    let r = run_arabi(source).unwrap();
+    assert_eq!(r.globals.get("ن1"), Some(&Value::String(Rc::new("بودي: واف!".to_string()))));
+    assert_eq!(r.globals.get("ن2"), Some(&Value::String(Rc::new("ميوي: نياو!".to_string()))));
+    assert_eq!(r.globals.get("ن3"), Some(&Value::String(Rc::new("...".to_string()))));
+}
