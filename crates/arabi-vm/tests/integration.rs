@@ -1419,7 +1419,7 @@ fn test_119_set_comprehension() {
 
 #[test]
 fn test_120_recursion_depth_limit() {
-    let source = "دالة بحت_لانهائي():\n    بحت_لانهائي()\nالناتج = \"بداية\"\nبحت_لانائي()\nالناتج = \"نهاية\"";
+    let source = "دالة بحت_لانهائي(ن):\n    ن = ن + 1\n    م = بحت_لانهائي(ن)\n    م\nالناتج = \"بداية\"\nبحت_لانهائي(0)\nالناتج = \"نهاية\"";
     match run_arabi(source) {
         Ok(r) => {
             panic!("Expected error but got OK. الناتج = {:?}", r.globals.get("الناتج"));

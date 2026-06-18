@@ -38,12 +38,8 @@ fn vm_to_string(val: &Value, vm: &mut crate::vm::VM, module: &mut arabi_compiler
 }
 
 fn rand_random() -> f64 {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let mut hasher = DefaultHasher::new();
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos().hash(&mut hasher);
-    (hasher.finish() % 1000000) as f64 / 1000000.0
+    use rand::Rng;
+    rand::thread_rng().gen::<f64>()
 }
 
 pub fn call_native(name: &str, args: &[Value], kwargs: &[(String, Value)], vm: &mut crate::vm::VM, module: &mut arabi_compiler::bytecode::BytecodeModule) -> Result<Value, RuntimeError> {
@@ -1225,7 +1221,7 @@ pub fn call_native(name: &str, args: &[Value], kwargs: &[(String, Value)], vm: &
             Ok(Value::List(SharedList::new(result)))
         }
 
-        "اختزل" => {
+        "اختزل" | "اختزال" => {
             if args.len() < 2 {
                 return Err(RuntimeError::new("اختزل يتطلب دالة وقائمة"));
             }
@@ -2351,31 +2347,6 @@ pub fn call_native(name: &str, args: &[Value], kwargs: &[(String, Value)], vm: &
                 }
                 _ => Err(RuntimeError::new_typed("استثناء_نوع", "احذف_قيمة يتطلب مصفوفة")),
             }
-        }
-
-        "اختزال" => {
-            if args.len() < 2 {
-                return Err(RuntimeError::new("اختزال يتطلب دالة ومجموعة"));
-            }
-            let func = &args[0];
-            let iterable = &args[1];
-            let items: Vec<Value> = match iterable {
-                Value::List(l) => l.borrow().clone(),
-                Value::Tuple(t) => t.as_ref().clone(),
-                _ => return Err(RuntimeError::new_typed("استثناء_نوع", "اختزال يتطلب قائمة او مترابطة")),
-            };
-            let mut acc = if args.len() > 2 {
-                args[2].clone()
-            } else if items.is_empty() {
-                return Err(RuntimeError::new("اختزال يتطلب قائمة غير فارغة بدون قيمة ابتدائية"));
-            } else {
-                items[0].clone()
-            };
-            let start = if args.len() > 2 { 0 } else { 1 };
-            for item in &items[start..] {
-                acc = func.call(&[acc, item.clone()], &[], vm, module)?;
-            }
-            Ok(acc)
         }
 
         "نفذ" => {

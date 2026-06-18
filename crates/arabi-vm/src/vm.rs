@@ -56,7 +56,7 @@ static BUILTIN_NAMES: LazyLock<std::collections::HashSet<&'static str>> = LazyLo
         "تشفير_64", "فك_تشفير_64", "تشفير_سداسي", "فك_تشفير_سداسي", "تشفير_رابط",
         "مفتاح_اكبر", "مفتاح_اصغر", "قيمة_اكبر", "قيمة_اصغر",
         "ادمج", "فرغ", "كرر", "موجود",
-        "عد", "اقتران", "اختزل",
+        "عد", "اقتران", "اختزل", "اختزال",
         "طلب", "طلب_نص", "طلب_كائن", "طلب_ارسال",
         "حاصل_ضرب", "نسبة", "تقريب_ل", "علامة",
         "بذرة", "منتظم",
@@ -188,7 +188,7 @@ impl VM {
         "تشفير_64", "فك_تشفير_64", "تشفير_سداسي", "فك_تشفير_سداسي", "تشفير_رابط",
         "مفتاح_اكبر", "مفتاح_اصغر", "قيمة_اكبر", "قيمة_اصغر",
         "ادمج", "فرغ", "كرر", "موجود",
-        "عد", "اقتران", "اختزل",
+        "عد", "اقتران", "اختزل", "اختزال",
         "طلب", "طلب_نص", "طلب_كائن", "طلب_ارسال",
         "حاصل_ضرب", "نسبة", "تقريب_ل", "علامة",
         "نمط_طابق", "نمط_ابحث", "نمط_استبدل", "نمط_قسم", "نمط_جميع", "نمط_كل_التطابقات",
@@ -206,7 +206,7 @@ impl VM {
             "مجموع_مربعات", "متوسط_وزني",
             "اختيار", "عينة", "خلط", "طبيعي", "برنولي", "عشوائي_نطاق", "جميل", "تحقق",
             "انضم", "مسار_مطلق", "نسخ", "نقل", "قائمة_مجلد", "مشي", "متغير_بيئي",
-            "احذف_عنصر", "احطظ", "ادخل_في", "احذف_قيمة", "اختزال", "نفذ", "اخرج",
+        "احذف_عنصر", "احطظ", "ادخل_في", "احذف_قيمة", "نفذ", "اخرج",
         ];
         // NEW: Added builtin names for functional/dict operations
         let builtin_names_extra = vec![
@@ -1523,24 +1523,26 @@ impl VM {
                 OP_STORE_ATTR => {
                     let value = hot_pop!();
                     let mut obj = hot_pop!();
-                    let name_str = module.names[b].clone();
-                    if !obj.set_attribute(name_str.clone(), value.clone()) {
-                        // Try __عيّن__ magic method
-                        if let Value::Instance(rc) = &obj {
-                            if let Some(method) = rc.class.methods.get("__عيّن__").cloned() {
-                                let name_val = Value::String(Rc::new(name_str));
-                                match method.call(&[obj.clone(), name_val, value], &[], self, module) {
-                                    Ok(_) => {}
-                                    Err(e) => {
-                                        runtime_error!("استثناء_اسم", e.to_string());
+                    if let Value::Instance(_) = &obj {
+                        let name_str = module.names[b].clone();
+                        if !obj.set_attribute(name_str.clone(), value.clone()) {
+                            if let Value::Instance(rc) = &obj {
+                                if let Some(method) = rc.class.methods.get("__عيّن__").cloned() {
+                                    let name_val = Value::String(Rc::new(name_str));
+                                    match method.call(&[obj.clone(), name_val, value], &[], self, module) {
+                                        Ok(_) => {}
+                                        Err(e) => {
+                                            runtime_error!("استثناء_اسم", e.to_string());
+                                        }
                                     }
+                                } else {
+                                    runtime_error!("استثناء_اسم", format!("لا يمكن تعيين الخاصية: {}", name_str));
                                 }
-                            } else {
-                                runtime_error!("استثناء_اسم", format!("لا يمكن تعيين الخاصية: {}", name_str));
                             }
-                        } else {
-                            runtime_error!("استثناء_اسم", format!("لا يمكن تعيين الخاصية: {}", name_str));
                         }
+                    } else {
+                        let name_str = &module.names[b];
+                        runtime_error!("استثناء_اسم", format!("لا يمكن تعيين الخاصية: {}", name_str));
                     }
                 }
                 OP_LOAD_ATTR => {
