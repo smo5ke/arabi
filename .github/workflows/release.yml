@@ -25,6 +25,15 @@ jobs:
           - target: x86_64-apple-darwin
             os: macos-latest
             artifact: arabi-macos-amd64
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            artifact: arabi-macos-arm64
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            artifact: arabi-linux-arm64
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+            artifact: arabi-linux-arm64-musl
 
     steps:
       - uses: actions/checkout@v4
@@ -75,3 +84,6 @@ jobs:
             artifacts/arabi-linux-amd64
             artifacts/arabi-windows-amd64.exe
             artifacts/arabi-macos-amd64
+            artifacts/arabi-macos-arm64
+            artifacts/arabi-linux-arm64
+            artifacts/arabi-linux-arm64-musl

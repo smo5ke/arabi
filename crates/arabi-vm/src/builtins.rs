@@ -2,6 +2,22 @@ use crate::frame::{Value, SharedList, SharedDict, SharedSet, ExceptionData, Rang
 use crate::error::RuntimeError;
 use std::rc::Rc;
 use std::io::Read;
+use std::path::Path;
+
+pub fn read_source_file(path: &Path) -> Result<String, std::io::Error> {
+    let raw = std::fs::read(path)?;
+    if raw.len() >= 2 && raw[0] == 0xFF && raw[1] == 0xFE {
+        let (decoded, _, _) = encoding_rs::UTF_16LE.decode(&raw);
+        Ok(decoded.into_owned())
+    } else if raw.len() >= 2 && raw[0] == 0xFE && raw[1] == 0xFF {
+        let (decoded, _, _) = encoding_rs::UTF_16BE.decode(&raw);
+        Ok(decoded.into_owned())
+    } else if raw.len() >= 3 && raw[0] == 0xEF && raw[1] == 0xBB && raw[2] == 0xBF {
+        Ok(String::from_utf8_lossy(&raw[3..]).into_owned())
+    } else {
+        Ok(String::from_utf8_lossy(&raw).into_owned())
+    }
+}
 
 fn vm_to_string(val: &Value, vm: &mut crate::vm::VM, module: &mut arabi_compiler::bytecode::BytecodeModule) -> String {
     if let Value::Instance(rc) = val {
@@ -2368,21 +2384,25 @@ pub fn call_native(name: &str, args: &[Value], kwargs: &[(String, Value)], vm: &
                 Value::String(s) => s.as_ref().clone(),
                 _ => return Err(RuntimeError::new_typed("استثناء_نوع", "نفذ يتطلب نصاً")),
             };
-            match std::process::Command::new("sh").arg("-c").arg(&cmd_str).output() {
-                Ok(output) => {
-                    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-                    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-                    let code = output.status.code().unwrap_or(-1);
-                    let mut result = Vec::new();
-                    result.push(Value::Tuple(Rc::new(vec![
-                        Value::Integer(code as i64),
-                        Value::String(stdout.into()),
-                        Value::String(stderr.into()),
-                    ])));
-                    Ok(result.into_iter().next().expect("Vec just pushed one element"))
-                }
-                Err(e) => Err(RuntimeError::new(format!("فشل تنفيذ الأمر: {}", e))),
-            }
+            let output = if cfg!(windows) {
+                std::process::Command::new("cmd")
+                    .arg("/C")
+                    .arg(&cmd_str)
+                    .output()
+            } else {
+                std::process::Command::new("sh")
+                    .arg("-c")
+                    .arg(&cmd_str)
+                    .output()
+            }.map_err(|e| RuntimeError::new(format!("فشل تنفيذ الأمر: {}", e)))?;
+            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            let code = output.status.code().unwrap_or(-1);
+            Ok(Value::Tuple(Rc::new(vec![
+                Value::Integer(code as i64),
+                Value::String(stdout.into()),
+                Value::String(stderr.into()),
+            ])))
         }
 
         "اخرج" => {

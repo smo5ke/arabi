@@ -5154,7 +5154,7 @@ if let Value::Instance(rc) = &val {
         let path = &data.path;
         let root_name = &data.name;
 
-        let source = match std::fs::read_to_string(path) {
+        let source = match crate::builtins::read_source_file(path) {
             Ok(s) => s,
             Err(e) => return Err(RuntimeError::new_typed("استثناء_نوع", format!("خطا في قراءة الوحدة '{}': {}", root_name, e))),
         };

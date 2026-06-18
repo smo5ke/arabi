@@ -1,5 +1,6 @@
 ﻿use anyhow::{Result, Context};
 use std::fs;
+use std::path::Path;
 use std::env;
 use rustyline::DefaultEditor;
 use mimalloc::MiMalloc;
@@ -235,7 +236,7 @@ fn repl() -> Result<()> {
 }
 
 fn run_file(filename: &str, debug: bool) -> Result<()> {
-    let source = fs::read_to_string(filename).context(format!("فشل في قراءة الملف: {}", filename))?;
+    let source = arabi_vm::read_source_file(Path::new(filename)).context(format!("فشل في قراءة الملف: {}", filename))?;
     let mut lexer = arabi_lexer::Lexer::new(&source);
     let tokens = lexer.tokenize().context("خطا في التحليل")?;
     let mut parser = arabi_parser::Parser::new(tokens);
