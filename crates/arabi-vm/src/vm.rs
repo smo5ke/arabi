@@ -28,6 +28,9 @@ pub struct VM {
     mc_methods_ptr: *const std::collections::HashMap<String, Value>,
     mc_method: u64,
     mc_value: Value,
+    mc2_methods_ptr: *const std::collections::HashMap<String, Value>,
+    mc2_method: u64,
+    mc2_value: Value,
     pub(crate) memory_used: usize,
     memory_limit: usize,
 }
@@ -115,6 +118,9 @@ impl VM {
             mc_methods_ptr: std::ptr::null(),
             mc_method: 0,
             mc_value: Value::Null,
+            mc2_methods_ptr: std::ptr::null(),
+            mc2_method: 0,
+            mc2_value: Value::Null,
             memory_used: 0,
             memory_limit: 256 * 1024 * 1024,
             jit_compiler: CraneliftJIT::with_symbols(|builder| {
@@ -2040,8 +2046,141 @@ impl VM {
                                 continue;
                             }
                         }
+                    } else if a == 2 {
+                        // SPECIALIZED PATH: 2-arg function calls (no Vec heap alloc)
+                        let arg1 = hot_pop!();
+                        let arg0 = hot_pop!();
+                        let func = hot_pop!();
+                        match func {
+                            Value::Function(f) if !f.is_generator && f.varargs_param.is_none() && f.kwargs_param.is_none() => {
+                                let num_locals = f.num_locals.max(1);
+                                let body = f.body;
+                                let module_index = f.module_index;
+                                let normal_count = f.normal_param_count;
+                                let arena_offset = self.locals_arena.len();
+                                self.locals_arena.resize(arena_offset + num_locals, Value::Null);
+                                let local_vars_ptr = unsafe { self.locals_arena.as_mut_ptr().add(arena_offset) };
+                                if !f.closure.is_empty() {
+                                    for (idx, val) in f.closure.iter().cloned() {
+                                        if idx < num_locals { unsafe { *local_vars_ptr.add(idx) = val; } }
+                                    }
+                                }
+                                if normal_count >= 1 {
+                                    let li = f.param_indices.get(0).copied().unwrap_or(0);
+                                    if li < num_locals { unsafe { *local_vars_ptr.add(li) = arg0; } }
+                                }
+                                if normal_count >= 2 {
+                                    let li = f.param_indices.get(1).copied().unwrap_or(1);
+                                    if li < num_locals { unsafe { *local_vars_ptr.add(li) = arg1; } }
+                                }
+                                if let Some(idx) = module_index {
+                                    self.push_frame(arena_offset, num_locals, body)?;
+                                    let r = self.run_imported_frame(idx)?;
+                                    self.pop_frame();
+                                    r
+                                } else {
+                                    let ret_ip = ip;
+                                    let saved_handler_len = self.exception_handlers.len();
+                                    let saved_stack_len = unsafe { (*stack_ptr).len() };
+                                    if self.frames.len() >= self.frame_depth_limit {
+                                        runtime_error!("استثناء_بنية", format!("تجاوزت عمق الاستدعاء الحد الاقصى ({})", self.frame_depth_limit));
+                                    }
+                                    self.frames.push(Frame { arena_offset, arena_len: num_locals, return_ip: ret_ip, saved_handler_len, saved_stack_len });
+                                    {
+                                        let frame = self.frames.last().expect("VM frame stack empty: frame push/pop imbalance");
+                                        locals_ptr = unsafe { self.locals_arena.as_mut_ptr().add(frame.arena_offset) };
+                                        locals_len = frame.arena_len;
+                                    }
+                                    ip = body;
+                                    continue;
+                                }
+                            }
+                            Value::NativeFunction(ref nf) => {
+                                let result = crate::builtins::call_native(&nf.name, &[arg0, arg1], &[], self, module);
+                                match result {
+                                    Ok(v) => { hot_push!(v); continue; }
+                                    Err(e) => { runtime_error!(e.class_name(), e.to_string()); }
+                                }
+                            }
+                            _ => {
+                                let result = func.call(&[arg0, arg1], &[], self, module);
+                                match result {
+                                    Ok(v) => { hot_push!(v); continue; }
+                                    Err(e) => { runtime_error!(e.class_name(), e.to_string()); }
+                                }
+                            }
+                        }
+                    } else if a == 3 {
+                        // SPECIALIZED PATH: 3-arg function calls (N-Queens hot path, no Vec heap alloc)
+                        let arg2 = hot_pop!();
+                        let arg1 = hot_pop!();
+                        let arg0 = hot_pop!();
+                        let func = hot_pop!();
+                        match func {
+                            Value::Function(f) if !f.is_generator && f.varargs_param.is_none() && f.kwargs_param.is_none() => {
+                                let num_locals = f.num_locals.max(1);
+                                let body = f.body;
+                                let module_index = f.module_index;
+                                let normal_count = f.normal_param_count;
+                                let arena_offset = self.locals_arena.len();
+                                self.locals_arena.resize(arena_offset + num_locals, Value::Null);
+                                let local_vars_ptr = unsafe { self.locals_arena.as_mut_ptr().add(arena_offset) };
+                                if !f.closure.is_empty() {
+                                    for (idx, val) in f.closure.iter().cloned() {
+                                        if idx < num_locals { unsafe { *local_vars_ptr.add(idx) = val; } }
+                                    }
+                                }
+                                if normal_count >= 1 {
+                                    let li = f.param_indices.get(0).copied().unwrap_or(0);
+                                    if li < num_locals { unsafe { *local_vars_ptr.add(li) = arg0; } }
+                                }
+                                if normal_count >= 2 {
+                                    let li = f.param_indices.get(1).copied().unwrap_or(1);
+                                    if li < num_locals { unsafe { *local_vars_ptr.add(li) = arg1; } }
+                                }
+                                if normal_count >= 3 {
+                                    let li = f.param_indices.get(2).copied().unwrap_or(2);
+                                    if li < num_locals { unsafe { *local_vars_ptr.add(li) = arg2; } }
+                                }
+                                if let Some(idx) = module_index {
+                                    self.push_frame(arena_offset, num_locals, body)?;
+                                    let r = self.run_imported_frame(idx)?;
+                                    self.pop_frame();
+                                    r
+                                } else {
+                                    let ret_ip = ip;
+                                    let saved_handler_len = self.exception_handlers.len();
+                                    let saved_stack_len = unsafe { (*stack_ptr).len() };
+                                    if self.frames.len() >= self.frame_depth_limit {
+                                        runtime_error!("استثناء_بنية", format!("تجاوزت عمق الاستدعاء الحد الاقصى ({})", self.frame_depth_limit));
+                                    }
+                                    self.frames.push(Frame { arena_offset, arena_len: num_locals, return_ip: ret_ip, saved_handler_len, saved_stack_len });
+                                    {
+                                        let frame = self.frames.last().expect("VM frame stack empty: frame push/pop imbalance");
+                                        locals_ptr = unsafe { self.locals_arena.as_mut_ptr().add(frame.arena_offset) };
+                                        locals_len = frame.arena_len;
+                                    }
+                                    ip = body;
+                                    continue;
+                                }
+                            }
+                            Value::NativeFunction(ref nf) => {
+                                let result = crate::builtins::call_native(&nf.name, &[arg0, arg1, arg2], &[], self, module);
+                                match result {
+                                    Ok(v) => { hot_push!(v); continue; }
+                                    Err(e) => { runtime_error!(e.class_name(), e.to_string()); }
+                                }
+                            }
+                            _ => {
+                                let result = func.call(&[arg0, arg1, arg2], &[], self, module);
+                                match result {
+                                    Ok(v) => { hot_push!(v); continue; }
+                                    Err(e) => { runtime_error!(e.class_name(), e.to_string()); }
+                                }
+                            }
+                        }
                     } else {
-                        // GENERAL PATH: 3+ args
+                        // GENERAL PATH: 4+ args
                         let mut args = Vec::with_capacity(a);
                         for _ in 0..a {
                             args.push(hot_pop!());
@@ -4139,19 +4278,15 @@ if let Value::Instance(rc) = &val {
                     }
                     // FAST PATH: Instance custom method — skip all 40+ builtin checks
                     if let Value::Instance(rc) = &obj {
-                        let name_hash = {
-                            let mut h: u64 = 0xcbf29ce484222325;
-                            for b in method_name_str.as_bytes() {
-                                h ^= *b as u64;
-                                h = h.wrapping_mul(0x100000001b3);
-                            }
-                            h
-                        };
+                        let name_hash = c as u64;
                         // DIRECT ACCESS: no outer RefCell borrow needed
                         let methods_ptr = Rc::as_ptr(&rc.class.methods);
-                        let cache_hit = methods_ptr == self.mc_methods_ptr && name_hash == self.mc_method;
+                        let hit1 = methods_ptr == self.mc_methods_ptr && name_hash == self.mc_method;
+                        let hit2 = methods_ptr == self.mc2_methods_ptr && name_hash == self.mc2_method;
+                        let cache_hit = hit1 || hit2;
                         if cache_hit {
-                            match &self.mc_value {
+                            let cached_val = if hit1 { &self.mc_value } else { &self.mc2_value };
+                            match cached_val {
                                 Value::FastMethod(fm) => {
                                     let (v1, v2) = (rc.get_field(fm.field1.as_str()).unwrap_or(Value::Null),
                                                      rc.get_field(fm.field2.as_str()).unwrap_or(Value::Null));
@@ -4184,21 +4319,19 @@ if let Value::Instance(rc) = &val {
                                 }
                                 other => {
                                     let method_val = other.clone();
-                                    match method_val {
-                                        Value::Function(f) => {
-                                            let param_indices = f.param_indices.clone();
+                                    if let Value::Function(ref f) = method_val {
                                             let body = f.body;
                                             let n_locals = f.num_locals.max(1);
                                              let class_name_str_rc = rc.class.name.clone();
-                                             let arena_offset = self.locals_arena.len();
+                                              let arena_offset = self.locals_arena.len();
                                             self.locals_arena.resize(arena_offset + n_locals, Value::Null);
                                             let local_vars_ptr = unsafe { self.locals_arena.as_mut_ptr().add(arena_offset) };
                                             let this_val = obj.clone();
-                                            if let Some(&idx) = param_indices.first() {
+                                            if let Some(&idx) = f.param_indices.first() {
                                                 unsafe { *local_vars_ptr.add(idx) = this_val; }
                                             }
                                             for (i, arg) in args.iter().enumerate() {
-                                                let local_idx = param_indices.get(i + 1).copied().unwrap_or(i + 1);
+                                                let local_idx = f.param_indices.get(i + 1).copied().unwrap_or(i + 1);
                                                 if local_idx < n_locals {
                                                     unsafe { *local_vars_ptr.add(local_idx) = arg.clone(); }
                                                 }
@@ -4222,8 +4355,7 @@ if let Value::Instance(rc) = &val {
                                                 ip = body;
                                                 continue;
                                             }
-                                        }
-                                        Value::NativeFunction(_) => {
+                                    } else if let Value::NativeFunction(_) = method_val {
                                             let mut all_args = Vec::with_capacity(args.len() + 1);
                                             all_args.push(obj.clone());
                                             all_args.extend(args.iter().cloned());
@@ -4235,20 +4367,26 @@ if let Value::Instance(rc) = &val {
                                             }
                                             hot_push!(result);
                                             continue;
-                                        }
-                                        _ => {
+                                    } else {
                                             runtime_error!("استثناء_نوع", format!("ال_method {} ليست function", method_name_str));
-                                        }
                                     }
                                 }
                             }
                         } else {
-                            // Cache miss: lookup + update + handle
+                            // Cache miss: lookup + update both cache slots
                             let val = rc.class.methods.get(method_name_str).cloned();
                             if let Some(ref v) = val {
-                                self.mc_methods_ptr = methods_ptr;
-                                self.mc_method = name_hash;
-                                self.mc_value = v.clone();
+                                if self.mc_methods_ptr == methods_ptr {
+                                    // Same class, different method → fill slot 2
+                                    self.mc2_methods_ptr = methods_ptr;
+                                    self.mc2_method = name_hash;
+                                    self.mc2_value = v.clone();
+                                } else {
+                                    // Different class → fill slot 1
+                                    self.mc_methods_ptr = methods_ptr;
+                                    self.mc_method = name_hash;
+                                    self.mc_value = v.clone();
+                                }
                             }
                             match val {
                                 Some(Value::FastMethod(fm)) => {
@@ -4281,8 +4419,7 @@ if let Value::Instance(rc) = &val {
                                     }
                                     continue;
                                 }
-                                Some(Value::Function(f)) => {
-                                    let param_indices = f.param_indices.clone();
+                                Some(Value::Function(ref f)) => {
                                     let body = f.body;
                                     let n_locals = f.num_locals.max(1);
                                     let class_name_str_rc = rc.class.name.clone();
@@ -4290,11 +4427,11 @@ if let Value::Instance(rc) = &val {
                                     self.locals_arena.resize(arena_offset + n_locals, Value::Null);
                                     let local_vars_ptr = unsafe { self.locals_arena.as_mut_ptr().add(arena_offset) };
                                     let this_val = obj.clone();
-                                    if let Some(&idx) = param_indices.first() {
+                                    if let Some(&idx) = f.param_indices.first() {
                                         unsafe { *local_vars_ptr.add(idx) = this_val; }
                                     }
                                     for (i, arg) in args.iter().enumerate() {
-                                        let local_idx = param_indices.get(i + 1).copied().unwrap_or(i + 1);
+                                        let local_idx = f.param_indices.get(i + 1).copied().unwrap_or(i + 1);
                                         if local_idx < n_locals {
                                             unsafe { *local_vars_ptr.add(local_idx) = arg.clone(); }
                                         }

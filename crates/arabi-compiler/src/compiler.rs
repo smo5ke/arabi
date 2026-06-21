@@ -1141,7 +1141,7 @@ impl Compiler {
             let mut count = 0;
             let mut i = 0;
             while i + 1 < len {
-                if let Opcode::CallMethod(name_idx, 1) = self.instructions[i].opcode {
+                if let Opcode::CallMethod(name_idx, 1, _) = self.instructions[i].opcode {
                     if name_idx < self.names.len() && self.names[name_idx] == "اضف" {
                         if matches!(self.instructions[i + 1].opcode, Opcode::PopTop) {
                             let cm_pos = i;
@@ -1164,7 +1164,7 @@ impl Compiler {
                                     Opcode::LogicalAnd | Opcode::LogicalOr |
                                     Opcode::Subscript => -1,
                                     Opcode::CallFunction(n) => -(*n as i32),
-                                    Opcode::CallMethod(_, n) => -(*n as i32),
+                                    Opcode::CallMethod(_, n, _) => -(*n as i32),
                                     Opcode::Nop => 0,
                                     _ => 0,
                                 };
@@ -1990,7 +1990,8 @@ impl Compiler {
                 self.emit(Opcode::StoreFast(ctx_idx), 0);
                 self.emit(Opcode::LoadFast(ctx_idx), 0);
                 let enter_idx = self.intern_name("__ادخل__");
-                self.emit(Opcode::CallMethod(enter_idx, 0), 0);
+                let hash = crate::bytecode::fnv1a_hash(&self.names[enter_idx]) as u32;
+                self.emit(Opcode::CallMethod(enter_idx, 0, hash), 0);
                 if let Some(name) = target {
                     let idx = self.get_or_create_local(name);
                     self.emit(Opcode::StoreFast(idx), 0);
@@ -2004,7 +2005,8 @@ impl Compiler {
                 }
                 self.emit(Opcode::LoadFast(ctx_idx), 0);
                 let exit_idx = self.intern_name("__اترك__");
-                self.emit(Opcode::CallMethod(exit_idx, 0), 0);
+                let hash = crate::bytecode::fnv1a_hash(&self.names[exit_idx]) as u32;
+                self.emit(Opcode::CallMethod(exit_idx, 0, hash), 0);
                 self.emit(Opcode::PopTop, 0);
                 self.emit(Opcode::JumpForward(0), 0);
                 let jump_end_idx = self.instructions.len() - 1;
@@ -2015,7 +2017,8 @@ impl Compiler {
                 self.emit(Opcode::PopTop, 0);
                 self.emit(Opcode::LoadFast(ctx_idx), 0);
                 let exit_idx2 = self.intern_name("__اترك__");
-                self.emit(Opcode::CallMethod(exit_idx2, 0), 0);
+                let hash2 = crate::bytecode::fnv1a_hash(&self.names[exit_idx2]) as u32;
+                self.emit(Opcode::CallMethod(exit_idx2, 0, hash2), 0);
                 self.emit(Opcode::PopTop, 0);
                 let end_ip = self.instructions.len();
                 if let Opcode::JumpForward(ref mut target) = self.instructions[jump_end_idx].opcode {
@@ -2262,7 +2265,8 @@ impl Compiler {
                         self.compile_expr(arg)?;
                     }
                     let method_idx = self.intern_name(name);
-                    self.emit(Opcode::CallMethod(method_idx, args.len()), 0);
+                    let hash = crate::bytecode::fnv1a_hash(&self.names[method_idx]) as u32;
+                    self.emit(Opcode::CallMethod(method_idx, args.len(), hash), 0);
                 } else {
                     let has_unpack = !unpack_args.is_empty() || !unpack_kwargs.is_empty();
                     if has_unpack {

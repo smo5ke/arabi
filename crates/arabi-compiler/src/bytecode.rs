@@ -84,8 +84,8 @@ pub enum Opcode {
     // Classes
     CreateClass(usize, usize, usize),
     CreateInstance(usize),
-    CallMethod(usize, usize),
-    CallMethodVoid(usize, usize),
+    CallMethod(usize, usize, u32),
+    CallMethodVoid(usize, usize, u32),
 
     // Data structures
     BuildList(usize),
@@ -377,6 +377,17 @@ pub struct Instruction {
 //   bits 32-63:  operand c (jump target, flags, etc.)
 pub type PackedInstr = u64;
 
+// ===== FVN-1a hash for method cache (precomputed at compile time) =====
+#[inline(always)]
+pub fn fnv1a_hash(s: &str) -> u64 {
+    let mut h: u64 = 0xcbf29ce484222325;
+    for b in s.as_bytes() {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    h
+}
+
 #[inline(always)]
 pub fn pack_instr(opcode: u8, a: u8, b: u16, c: u32) -> PackedInstr {
     (opcode as u64)
@@ -469,8 +480,8 @@ impl Instruction {
                 pack_instr(OP_CREATE_CLASS, *class_name as u8, self.operand as u16, ((*parent_count as u32) << 16) | (*method_count as u32))
             }
             Opcode::CreateInstance(idx) => pack_instr(OP_CREATE_INSTANCE, *idx as u8, 0, 0),
-            Opcode::CallMethod(idx, argc) => pack_instr(OP_CALL_METHOD, *idx as u8, *argc as u16, 0),
-            Opcode::CallMethodVoid(idx, argc) => pack_instr(OP_CALL_METHOD_VOID, *idx as u8, *argc as u16, 0),
+            Opcode::CallMethod(idx, argc, hash) => pack_instr(OP_CALL_METHOD, *idx as u8, *argc as u16, *hash),
+            Opcode::CallMethodVoid(idx, argc, hash) => pack_instr(OP_CALL_METHOD_VOID, *idx as u8, *argc as u16, *hash),
             Opcode::BuildList(len) => pack_instr(OP_BUILD_LIST, *len as u8, 0, 0),
             Opcode::BuildTuple(len) => pack_instr(OP_BUILD_TUPLE, *len as u8, 0, 0),
             Opcode::BuildDict(len) => pack_instr(OP_BUILD_DICT, *len as u8, 0, 0),
