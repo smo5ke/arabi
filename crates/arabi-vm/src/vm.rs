@@ -3934,7 +3934,7 @@ if let Value::Instance(rc) = &val {
                                         let pi2 = packed[ip];
                                         let op2 = pi2 as u8;
                                         let local_a2 = ((pi2 >> 8) & 0xFF) as usize;
-                                        if op2 == OP_LOAD_FAST && local_a2 > 0 {
+                                        if (op2 == OP_LOAD_FAST && local_a2 > 0) || op2 == OP_LOAD_NONE || op2 == OP_LOAD_TRUE || op2 == OP_LOAD_FALSE || op2 == OP_LOAD_CONST {
                                             ip += 1;
                                             if ip >= packed.len() { ok = false; break; }
                                             let pi3 = packed[ip];
@@ -3960,7 +3960,7 @@ if let Value::Instance(rc) = &val {
                                 }
                             }
                         }
-                        if ok && !detected_fields.is_empty() && detected_fields.len() == f.params.len().saturating_sub(1) {
+                        if ok && !detected_fields.is_empty() {
                             detected_fields
                         } else {
                             Vec::new()
