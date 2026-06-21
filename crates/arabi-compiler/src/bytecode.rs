@@ -181,6 +181,10 @@ pub enum Opcode {
     GetInstanceField(usize),
     SetInstanceField(usize),                 // pop value from stack → locals[a] += value — fused sum accumulation
     InplaceAddStrConst(usize),               // locals[a] += const[b] — in-place string concatenation
+
+    // Fused subscript+compare+jump opcodes (Tier 9 - N-Queens / array-heavy benchmarks)
+    PopJumpIfSubscriptEqLocal(usize, usize, usize, usize), // if locals[a][locals[b]] == locals[c], jump to target d
+    PopJumpIfSubscriptNeLocal(usize, usize, usize, usize), // if locals[a][locals[b]] != locals[c], jump to target d
 }
 
 // Quick opcode constants for adaptive specialization
@@ -327,6 +331,8 @@ pub const OP_BINARY_BIT_XOR: u8 = 124;
 pub const OP_BINARY_SHL: u8 = 125;
 pub const OP_BINARY_SHR: u8 = 126;
 pub const OP_UNARY_BIT_NOT: u8 = 127;
+pub const OP_POP_JUMP_IF_SUBSCRIPT_EQ_LOCAL: u8 = 128;
+pub const OP_POP_JUMP_IF_SUBSCRIPT_NE_LOCAL: u8 = 129;
 
 impl Opcode {
     pub fn as_jump_offset_mut(&mut self) -> Option<&mut usize> {
@@ -604,6 +610,14 @@ impl Instruction {
             }
             Opcode::InplaceAddStrConst(a) => {
                 pack_instr(OP_INPLACE_ADD_STR_CONST, *a as u8, self.operand as u16, 0)
+            }
+            Opcode::PopJumpIfSubscriptEqLocal(a, b, c, target) => {
+                let bc = (*b as u16) | ((*c as u16) << 8);
+                pack_instr(OP_POP_JUMP_IF_SUBSCRIPT_EQ_LOCAL, *a as u8, bc, *target as u32)
+            }
+            Opcode::PopJumpIfSubscriptNeLocal(a, b, c, target) => {
+                let bc = (*b as u16) | ((*c as u16) << 8);
+                pack_instr(OP_POP_JUMP_IF_SUBSCRIPT_NE_LOCAL, *a as u8, bc, *target as u32)
             }
         }
     }

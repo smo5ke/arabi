@@ -3550,6 +3550,78 @@ impl VM {
                         }
                     }
                 }
+                OP_POP_JUMP_IF_SUBSCRIPT_EQ_LOCAL => {
+                    let list_local = a;
+                    let idx_local = (b & 0xFF) as usize;
+                    let compare_local = ((b >> 8) & 0xFF) as usize;
+                    let target = c;
+                    unsafe {
+                        if list_local < locals_len && idx_local < locals_len && compare_local < locals_len {
+                            let list = &*locals_ptr.add(list_local);
+                            let idx_val = &*locals_ptr.add(idx_local);
+                            let cmp_val = &*locals_ptr.add(compare_local);
+                            if let (Value::List(items), Value::Integer(i)) = (list, idx_val) {
+                                let len = items.len();
+                                let idx = if *i < 0 { len as i64 + i } else { *i } as usize;
+                                if idx < len {
+                                    let elem = items.get_unchecked(idx);
+                                    // PopJumpIfFalse: jump when NOT equal
+                                    let are_equal = match (elem, cmp_val) {
+                                        (Value::Integer(a), Value::Integer(b)) => *a == *b,
+                                        (Value::Float(a), Value::Float(b)) => *a == *b,
+                                        (Value::Integer(a), Value::Float(b)) => *a as f64 == *b,
+                                        (Value::Float(a), Value::Integer(b)) => *a == *b as f64,
+                                        (Value::Boolean(a), Value::Boolean(b)) => *a == *b,
+                                        (Value::Null, Value::Null) => true,
+                                        (Value::String(a), Value::String(b)) => **a == **b,
+                                        _ => false,
+                                    };
+                                    if !are_equal { ip = target; continue; }
+                                } else {
+                                    runtime_error!("استثناء_نطاق", "فهرس خارج النطاق".to_string());
+                                }
+                            } else {
+                                runtime_error!("استثناء_نوع", "غير قادر على الوصول بالفهرس".to_string());
+                            }
+                        }
+                    }
+                }
+                OP_POP_JUMP_IF_SUBSCRIPT_NE_LOCAL => {
+                    let list_local = a;
+                    let idx_local = (b & 0xFF) as usize;
+                    let compare_local = ((b >> 8) & 0xFF) as usize;
+                    let target = c;
+                    unsafe {
+                        if list_local < locals_len && idx_local < locals_len && compare_local < locals_len {
+                            let list = &*locals_ptr.add(list_local);
+                            let idx_val = &*locals_ptr.add(idx_local);
+                            let cmp_val = &*locals_ptr.add(compare_local);
+                            if let (Value::List(items), Value::Integer(i)) = (list, idx_val) {
+                                let len = items.len();
+                                let idx = if *i < 0 { len as i64 + i } else { *i } as usize;
+                                if idx < len {
+                                    let elem = items.get_unchecked(idx);
+                                    // PopJumpIfTrue: jump when equal
+                                    let are_equal = match (elem, cmp_val) {
+                                        (Value::Integer(a), Value::Integer(b)) => *a == *b,
+                                        (Value::Float(a), Value::Float(b)) => *a == *b,
+                                        (Value::Integer(a), Value::Float(b)) => *a as f64 == *b,
+                                        (Value::Float(a), Value::Integer(b)) => *a == *b as f64,
+                                        (Value::Boolean(a), Value::Boolean(b)) => *a == *b,
+                                        (Value::Null, Value::Null) => true,
+                                        (Value::String(a), Value::String(b)) => **a == **b,
+                                        _ => false,
+                                    };
+                                    if are_equal { ip = target; continue; }
+                                } else {
+                                    runtime_error!("استثناء_نطاق", "فهرس خارج النطاق".to_string());
+                                }
+                            } else {
+                                runtime_error!("استثناء_نوع", "غير قادر على الوصول بالفهرس".to_string());
+                            }
+                        }
+                    }
+                }
                 OP_FLOAT_ADD_MUL_LOCAL => {
                     let dst = a;
                     let src1 = b as usize;

@@ -1350,7 +1350,79 @@ impl Compiler {
             eprintln!("[peephole] Pass 32: algebraic simplifications: {}", pass32_count);
         }
 
-        // Pass 33: Disabled — CallMethodVoid handler needs full dispatch chain
+        // Pass 33: Fuse SubscriptLocal + LoadFast + CompareEq + PopJumpIfFalse → PopJumpIfSubscriptEqLocal
+        // Skip Nops when scanning for the pattern
+        {
+            let mut pass33_count = 0usize;
+            let len = self.instructions.len();
+            let mut i = 0;
+            while i + 1 < len {
+                if matches!(self.instructions[i].opcode, Opcode::Nop) { i += 1; continue; }
+                if !matches!(self.instructions[i].opcode, Opcode::SubscriptLocal(_, _)) { i += 1; continue; }
+                
+                // Find next non-Nop instruction after SubscriptLocal
+                let mut j = i + 1;
+                while j < len && matches!(self.instructions[j].opcode, Opcode::Nop) { j += 1; }
+                if j >= len { break; }
+                if !matches!(self.instructions[j].opcode, Opcode::LoadFast(_)) { i += 1; continue; }
+                
+                // Find next non-Nop instruction after LoadFast
+                let mut k = j + 1;
+                while k < len && matches!(self.instructions[k].opcode, Opcode::Nop) { k += 1; }
+                if k >= len { break; }
+                if !matches!(self.instructions[k].opcode, Opcode::CompareEq | Opcode::CompareEqIntInt) { i += 1; continue; }
+                
+                // Find next non-Nop instruction after CompareEq
+                let mut m = k + 1;
+                while m < len && matches!(self.instructions[m].opcode, Opcode::Nop) { m += 1; }
+                if m >= len { break; }
+                
+                match &self.instructions[m].opcode {
+                    Opcode::PopJumpIfFalse(offset) => {
+                        if let (
+                            Opcode::SubscriptLocal(list_local, idx_local),
+                            Opcode::LoadFast(compare_local),
+                        ) = (&self.instructions[i].opcode, &self.instructions[j].opcode) {
+                            let target_val = m + offset;
+                            let line = self.instructions[i].line;
+                            let ll = *list_local;
+                            let il = *idx_local;
+                            let cl = *compare_local;
+                            self.instructions[i].opcode = Opcode::PopJumpIfSubscriptEqLocal(ll, il, cl, target_val);
+                            self.instructions[i].line = line;
+                            self.instructions[j].opcode = Opcode::Nop;
+                            self.instructions[k].opcode = Opcode::Nop;
+                            self.instructions[m].opcode = Opcode::Nop;
+                            pass33_count += 1;
+                            i = m + 1;
+                        } else { i += 1; }
+                    }
+                    Opcode::PopJumpIfTrue(offset) => {
+                        if let (
+                            Opcode::SubscriptLocal(list_local, idx_local),
+                            Opcode::LoadFast(compare_local),
+                        ) = (&self.instructions[i].opcode, &self.instructions[j].opcode) {
+                            let target_val = m + offset;
+                            let line = self.instructions[i].line;
+                            let ll = *list_local;
+                            let il = *idx_local;
+                            let cl = *compare_local;
+                            self.instructions[i].opcode = Opcode::PopJumpIfSubscriptNeLocal(ll, il, cl, target_val);
+                            self.instructions[i].line = line;
+                            self.instructions[j].opcode = Opcode::Nop;
+                            self.instructions[k].opcode = Opcode::Nop;
+                            self.instructions[m].opcode = Opcode::Nop;
+                            pass33_count += 1;
+                            i = m + 1;
+                        } else { i += 1; }
+                    }
+                    _ => { i += 1; }
+                }
+            }
+            if pass33_count > 0 {
+                eprintln!("[peephole] Pass 33: fused {} SubscriptLocal+CompareEq+Jump patterns", pass33_count);
+            }
+        }
 
         // Pass 22: Compact — remove all Nop instructions and adjust jump targets
         let old_len = self.instructions.len();
@@ -1446,6 +1518,11 @@ impl Compiler {
                     }
                 }
                 Opcode::PopJumpIfNotSqrAddSqrGtImm(_, _, _, target) => {
+                    if *target < old_len {
+                        *target = old_to_new[*target];
+                    }
+                }
+                Opcode::PopJumpIfSubscriptEqLocal(_, _, _, target) | Opcode::PopJumpIfSubscriptNeLocal(_, _, _, target) => {
                     if *target < old_len {
                         *target = old_to_new[*target];
                     }
