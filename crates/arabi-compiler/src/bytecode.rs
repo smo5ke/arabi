@@ -86,6 +86,9 @@ pub enum Opcode {
     CreateInstance(usize),
     CallMethod(usize, usize, u32),
     CallMethodVoid(usize, usize, u32),
+    CallMethod1Arg(usize, u32),  // name_idx + precomputed FVN hash — skip args_buf/reverse overhead
+    SubscriptLocalBinarySub(usize, usize, usize),  // list_local, idx_local, sub_local — list[idx] - locals[sub_local]
+    SubLocal(usize, usize),  // a_local, b_local — locals[a] - locals[b]
 
     // Data structures
     BuildList(usize),
@@ -333,6 +336,9 @@ pub const OP_BINARY_SHR: u8 = 126;
 pub const OP_UNARY_BIT_NOT: u8 = 127;
 pub const OP_POP_JUMP_IF_SUBSCRIPT_EQ_LOCAL: u8 = 128;
 pub const OP_POP_JUMP_IF_SUBSCRIPT_NE_LOCAL: u8 = 129;
+pub const OP_CALL_METHOD_1ARG: u8 = 130;
+pub const OP_SUBSCRIPT_LOCAL_BINARY_SUB: u8 = 131;
+pub const OP_SUB_LOCAL: u8 = 132;
 
 impl Opcode {
     pub fn as_jump_offset_mut(&mut self) -> Option<&mut usize> {
@@ -488,6 +494,9 @@ impl Instruction {
             Opcode::CreateInstance(idx) => pack_instr(OP_CREATE_INSTANCE, *idx as u8, 0, 0),
             Opcode::CallMethod(idx, argc, hash) => pack_instr(OP_CALL_METHOD, *idx as u8, *argc as u16, *hash),
             Opcode::CallMethodVoid(idx, argc, hash) => pack_instr(OP_CALL_METHOD_VOID, *idx as u8, *argc as u16, *hash),
+            Opcode::CallMethod1Arg(idx, hash) => pack_instr(OP_CALL_METHOD_1ARG, *idx as u8, 0, *hash),
+            Opcode::SubscriptLocalBinarySub(list, idx, sub) => pack_instr(OP_SUBSCRIPT_LOCAL_BINARY_SUB, *list as u8, *idx as u16, *sub as u32),
+            Opcode::SubLocal(a, b) => pack_instr(OP_SUB_LOCAL, *a as u8, *b as u16, 0),
             Opcode::BuildList(len) => pack_instr(OP_BUILD_LIST, *len as u8, 0, 0),
             Opcode::BuildTuple(len) => pack_instr(OP_BUILD_TUPLE, *len as u8, 0, 0),
             Opcode::BuildDict(len) => pack_instr(OP_BUILD_DICT, *len as u8, 0, 0),

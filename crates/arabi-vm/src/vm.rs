@@ -1398,6 +1398,65 @@ impl VM {
                 // Tier 3 specialized integer opcodes — skip type checks
                 OP_BINARY_ADD_INT_INT => { int_int_binop!(+, add); }
                 OP_BINARY_SUB_INT_INT => { int_int_binop!(-, sub); }
+
+                // Fused: locals[list][locals[idx]] - locals[sub_local]
+                OP_SUBSCRIPT_LOCAL_BINARY_SUB => {
+                    let list_local = a;
+                    let idx_local = b as usize;
+                    let sub_local = c as usize;
+                    unsafe {
+                        if list_local < locals_len && idx_local < locals_len && sub_local < locals_len {
+                            let list = &*locals_ptr.add(list_local);
+                            let idx_val = &*locals_ptr.add(idx_local);
+                            let sub_val = &*locals_ptr.add(sub_local);
+                            match (list, idx_val) {
+                                (Value::List(items), Value::Integer(i)) => {
+                                    let len = items.len();
+                                    let idx = if *i < 0 { len as i64 + i } else { *i } as usize;
+                                    if idx < len {
+                                        match (items.get_unchecked(idx), sub_val) {
+                                            (Value::Integer(v), Value::Integer(s)) => { hot_push!(Value::Integer(v - s)); }
+                                            (Value::Float(v), Value::Float(s)) => { hot_push!(Value::Float(v - s)); }
+                                            (Value::Integer(v), Value::Float(s)) => { hot_push!(Value::Float(*v as f64 - s)); }
+                                            (Value::Float(v), Value::Integer(s)) => { hot_push!(Value::Float(v - *s as f64)); }
+                                            _ => {
+                                                let item_val = items.get_unchecked(idx).clone();
+                                                let right_val = sub_val.clone();
+                                                hot_push!(Value::Null);
+                                            }
+                                        }
+                                    } else {
+                                        runtime_error!("استثناء_نطاق", "فهرس خارج النطاق".to_string());
+                                    }
+                                }
+                                _ => {
+                                    runtime_error!("استثناء_نوع", "SubscriptLocalBinarySub: غير مدعوم".to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Fused: locals[a] - locals[b]
+                OP_SUB_LOCAL => {
+                    let a_local = a;
+                    let b_local = b as usize;
+                    unsafe {
+                        if a_local < locals_len && b_local < locals_len {
+                            let left = &*locals_ptr.add(a_local);
+                            let right = &*locals_ptr.add(b_local);
+                            match (left, right) {
+                                (Value::Integer(l), Value::Integer(r)) => { hot_push!(Value::Integer(l - r)); }
+                                (Value::Float(l), Value::Float(r)) => { hot_push!(Value::Float(l - r)); }
+                                (Value::Integer(l), Value::Float(r)) => { hot_push!(Value::Float(*l as f64 - r)); }
+                                (Value::Float(l), Value::Integer(r)) => { hot_push!(Value::Float(l - *r as f64)); }
+                                _ => {
+                                    hot_push!(Value::Null);
+                                }
+                            }
+                        }
+                    }
+                }
                 OP_BINARY_MUL_INT_INT => { int_int_binop!(*, mul); }
                 OP_BINARY_DIV_INT_INT => { int_int_divop!(div); }
                 OP_BINARY_FLOOR_DIV_INT_INT => {
@@ -2046,70 +2105,6 @@ impl VM {
                                 continue;
                             }
                         }
-                    } else if a == 2 {
-                        // SPECIALIZED PATH: 2-arg function calls (no Vec heap alloc)
-                        let arg1 = hot_pop!();
-                        let arg0 = hot_pop!();
-                        let func = hot_pop!();
-                        match func {
-                            Value::Function(f) if !f.is_generator && f.varargs_param.is_none() && f.kwargs_param.is_none() => {
-                                let num_locals = f.num_locals.max(1);
-                                let body = f.body;
-                                let module_index = f.module_index;
-                                let normal_count = f.normal_param_count;
-                                let arena_offset = self.locals_arena.len();
-                                self.locals_arena.resize(arena_offset + num_locals, Value::Null);
-                                let local_vars_ptr = unsafe { self.locals_arena.as_mut_ptr().add(arena_offset) };
-                                if !f.closure.is_empty() {
-                                    for (idx, val) in f.closure.iter().cloned() {
-                                        if idx < num_locals { unsafe { *local_vars_ptr.add(idx) = val; } }
-                                    }
-                                }
-                                if normal_count >= 1 {
-                                    let li = f.param_indices.get(0).copied().unwrap_or(0);
-                                    if li < num_locals { unsafe { *local_vars_ptr.add(li) = arg0; } }
-                                }
-                                if normal_count >= 2 {
-                                    let li = f.param_indices.get(1).copied().unwrap_or(1);
-                                    if li < num_locals { unsafe { *local_vars_ptr.add(li) = arg1; } }
-                                }
-                                if let Some(idx) = module_index {
-                                    self.push_frame(arena_offset, num_locals, body)?;
-                                    let r = self.run_imported_frame(idx)?;
-                                    self.pop_frame();
-                                    r
-                                } else {
-                                    let ret_ip = ip;
-                                    let saved_handler_len = self.exception_handlers.len();
-                                    let saved_stack_len = unsafe { (*stack_ptr).len() };
-                                    if self.frames.len() >= self.frame_depth_limit {
-                                        runtime_error!("استثناء_بنية", format!("تجاوزت عمق الاستدعاء الحد الاقصى ({})", self.frame_depth_limit));
-                                    }
-                                    self.frames.push(Frame { arena_offset, arena_len: num_locals, return_ip: ret_ip, saved_handler_len, saved_stack_len });
-                                    {
-                                        let frame = self.frames.last().expect("VM frame stack empty: frame push/pop imbalance");
-                                        locals_ptr = unsafe { self.locals_arena.as_mut_ptr().add(frame.arena_offset) };
-                                        locals_len = frame.arena_len;
-                                    }
-                                    ip = body;
-                                    continue;
-                                }
-                            }
-                            Value::NativeFunction(ref nf) => {
-                                let result = crate::builtins::call_native(&nf.name, &[arg0, arg1], &[], self, module);
-                                match result {
-                                    Ok(v) => { hot_push!(v); continue; }
-                                    Err(e) => { runtime_error!(e.class_name(), e.to_string()); }
-                                }
-                            }
-                            _ => {
-                                let result = func.call(&[arg0, arg1], &[], self, module);
-                                match result {
-                                    Ok(v) => { hot_push!(v); continue; }
-                                    Err(e) => { runtime_error!(e.class_name(), e.to_string()); }
-                                }
-                            }
-                        }
                     } else if a == 3 {
                         // SPECIALIZED PATH: 3-arg function calls (N-Queens hot path, no Vec heap alloc)
                         let arg2 = hot_pop!();
@@ -2122,6 +2117,8 @@ impl VM {
                                 let body = f.body;
                                 let module_index = f.module_index;
                                 let normal_count = f.normal_param_count;
+                                let cc = f.call_count.get();
+                                f.call_count.set(cc.wrapping_add(1));
                                 let arena_offset = self.locals_arena.len();
                                 self.locals_arena.resize(arena_offset + num_locals, Value::Null);
                                 let local_vars_ptr = unsafe { self.locals_arena.as_mut_ptr().add(arena_offset) };
@@ -2141,6 +2138,42 @@ impl VM {
                                 if normal_count >= 3 {
                                     let li = f.param_indices.get(2).copied().unwrap_or(2);
                                     if li < num_locals { unsafe { *local_vars_ptr.add(li) = arg2; } }
+                                }
+                                if !f.jit_attempted.get() && cc >= 5 {
+                                    f.jit_attempted.set(true);
+                                    if let Some(module_ref) = self.modules.last() {
+                                        if let Some(entry) = self.jit_compiler.compile_loop_function(
+                                            &f.name, f.body, f.normal_param_count, f.num_locals, module_ref,
+                                            &f.param_indices
+                                        ) {
+                                            f.jit_entry.set(Some(entry));
+                                        }
+                                    }
+                                }
+                                if let Some(jit_entry) = f.jit_entry.get() {
+                                    if self.jit_compiler.is_loop_compiled(f.body) {
+                                        let func_ptr: extern "C" fn(i64) -> i64 = unsafe { std::mem::transmute(jit_entry) };
+                                        let result_i64 = {
+                                            unsafe {
+                                                crate::jit_runtime::set_jit_context(
+                                                    self as *mut VM as *mut std::ffi::c_void,
+                                                    self.modules.last().map_or(std::ptr::null_mut(), |m| m as *const _ as *mut std::ffi::c_void),
+                                                );
+                                            }
+                                            let r = func_ptr(local_vars_ptr as i64);
+                                            unsafe { crate::jit_runtime::clear_jit_context(); }
+                                            r
+                                        };
+                                        if let Some(exc) = self.current_exception.take() {
+                                            if let Value::Exception(ref e) = exc {
+                                                self.locals_arena.truncate(arena_offset);
+                                                return Err(RuntimeError::new_typed(&e.class_name, &e.message).with_line(e.line.unwrap_or(0)));
+                                            }
+                                        }
+                                        self.locals_arena.truncate(arena_offset);
+                                        hot_push!(Value::Integer(result_i64));
+                                        continue;
+                                    }
                                 }
                                 if let Some(idx) = module_index {
                                     self.push_frame(arena_offset, num_locals, body)?;
@@ -4292,15 +4325,22 @@ if let Value::Instance(rc) = &val {
                 }
                 OP_CALL_METHOD => {
                     let method_name_str = &module.names[a];
-                    // Stack-based args: avoid heap allocation for method calls
-                    let args_len = b.min(4);
                     let mut args_buf: [Value; 4] = [Value::Null, Value::Null, Value::Null, Value::Null];
-                    for i in 0..args_len {
-                        args_buf[i] = hot_pop!();
+                    let obj;
+                    let args;
+                    if b == 1 {
+                        args_buf[0] = hot_pop!();
+                        obj = hot_pop!();
+                        args = &args_buf[..1];
+                    } else {
+                        let args_len = b.min(4);
+                        for i in 0..args_len {
+                            args_buf[i] = hot_pop!();
+                        }
+                        args_buf[..args_len].reverse();
+                        obj = hot_pop!();
+                        args = &args_buf[..args_len];
                     }
-                    args_buf[..args_len].reverse();
-                    let obj = hot_pop!();
-                    let args = &args_buf[..args_len];
                     // FAST PATH: String methods — skip Instance check + 50+ match arms
                     if let Value::String(s) = &obj {
                         match method_name_str.as_str() {

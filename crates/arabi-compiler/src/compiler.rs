@@ -1424,6 +1424,64 @@ impl Compiler {
             }
         }
 
+        // Pass 34: (reserved — 1-arg method call optimization handled in VM directly)
+
+        // Pass 35: Fuse SubscriptLocal+LoadFast+BinarySubtract → SubscriptLocalBinarySub
+        // Pattern: SubscriptLocal(list, idx) + LoadFast(sub) + BinarySubtract/SubIntInt
+        {
+            let mut pass35_count = 0usize;
+            let mut i = 0;
+            while i + 2 < self.instructions.len() {
+                let op0 = &self.instructions[i].opcode;
+                let op1 = &self.instructions[i + 1].opcode;
+                let op2 = &self.instructions[i + 2].opcode;
+                let mut fused = false;
+                if let Opcode::SubscriptLocal(list, idx) = op0 {
+                    if let Opcode::LoadFast(sub) = op1 {
+                        if matches!(op2, Opcode::BinarySubtract | Opcode::BinarySubIntInt) {
+                            self.instructions[i].opcode = Opcode::SubscriptLocalBinarySub(*list, *idx, *sub);
+                            self.instructions[i + 1].opcode = Opcode::Nop;
+                            self.instructions[i + 2].opcode = Opcode::Nop;
+                            pass35_count += 1;
+                            fused = true;
+                        }
+                    }
+                }
+                if fused { i += 3; } else { i += 1; }
+            }
+            if pass35_count > 0 {
+                eprintln!("[peephole] Pass 35: fused {} SubscriptLocal+BinarySub patterns", pass35_count);
+            }
+        }
+
+        // Pass 36: Fuse LoadFast+LoadFast+BinarySubtract → SubLocal
+        // Pattern: LoadFast(a) + LoadFast(b) + BinarySubtract/SubIntInt
+        {
+            let mut pass36_count = 0usize;
+            let mut i = 0;
+            while i + 2 < self.instructions.len() {
+                let op0 = &self.instructions[i].opcode;
+                let op1 = &self.instructions[i + 1].opcode;
+                let op2 = &self.instructions[i + 2].opcode;
+                let mut fused = false;
+                if let Opcode::LoadFast(a) = op0 {
+                    if let Opcode::LoadFast(b) = op1 {
+                        if matches!(op2, Opcode::BinarySubtract | Opcode::BinarySubIntInt) {
+                            self.instructions[i].opcode = Opcode::SubLocal(*a, *b);
+                            self.instructions[i + 1].opcode = Opcode::Nop;
+                            self.instructions[i + 2].opcode = Opcode::Nop;
+                            pass36_count += 1;
+                            fused = true;
+                        }
+                    }
+                }
+                if fused { i += 3; } else { i += 1; }
+            }
+            if pass36_count > 0 {
+                eprintln!("[peephole] Pass 36: fused {} SubLocal patterns", pass36_count);
+            }
+        }
+
         // Pass 22: Compact — remove all Nop instructions and adjust jump targets
         let old_len = self.instructions.len();
         if old_len == 0 { return; }
