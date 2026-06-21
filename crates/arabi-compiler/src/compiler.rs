@@ -1268,9 +1268,7 @@ impl Compiler {
                             _ => None,
                         };
                         if let Some(spec_op) = specialized {
-                            self.instructions[i].opcode = spec_op;
-                            self.instructions[i + 1].opcode = Opcode::Nop;
-                            self.instructions[i + 2].opcode = Opcode::Nop;
+                            self.instructions[i + 2].opcode = spec_op;
                             pass31_count += 1;
                             i += 3;
                             continue;
