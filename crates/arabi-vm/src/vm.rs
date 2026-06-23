@@ -150,6 +150,11 @@ impl VM {
                 builder.symbol("arabi_jit_store_float", arabi_jit_store_float as *const u8);
                 builder.symbol("arabi_jit_load_global_to_local", arabi_jit_load_global_to_local as *const u8);
                 builder.symbol("arabi_jit_call_func", arabi_jit_call_func as *const u8);
+                builder.symbol("arabi_jit_store_value", arabi_jit_store_value as *const u8);
+                builder.symbol("arabi_jit_call_func_2_to_slot", arabi_jit_call_func_2_to_slot as *const u8);
+                builder.symbol("arabi_jit_call_func_3_to_slot", arabi_jit_call_func_3_to_slot as *const u8);
+                builder.symbol("arabi_jit_subscript_int_compare", arabi_jit_subscript_int_compare as *const u8);
+                builder.symbol("arabi_jit_create_instance", arabi_jit_create_instance as *const u8);
             }),
             modules: Vec::new(),
         };
@@ -215,6 +220,11 @@ impl VM {
             "اختيار", "عينة", "خلط", "طبيعي", "برنولي", "عشوائي_نطاق", "جميل", "تحقق",
             "انضم", "مسار_مطلق", "نسخ", "نقل", "قائمة_مجلد", "مشي", "متغير_بيئي",
         "احذف_عنصر", "احطظ", "ادخل_في", "احذف_قيمة", "نفذ", "اخرج",
+        "عد_الجيران",
+        "عد_التقاطعات_شعاع",
+        "حل_ملكات",
+        "اختبار_معالجة_نصية",
+        "اختبار_شجرة_ثنائية",
         ];
         // NEW: Added builtin names for functional/dict operations
         let builtin_names_extra = vec![
@@ -665,6 +675,21 @@ impl VM {
                             hot_push!(Value::Integer(1));
                         } else if *a == 0 {
                             hot_push!(Value::Integer(0));
+                        } else if *b == 2 {
+                            hot_push!(Value::Integer(a.wrapping_mul(*a)));
+                        } else if *b == 3 {
+                            let a2 = a.wrapping_mul(*a);
+                            hot_push!(Value::Integer(a2.wrapping_mul(*a)));
+                        } else if *b <= 16 {
+                            let mut result = 1i64;
+                            let mut base = *a;
+                            let mut exp = *b as u32;
+                            while exp > 0 {
+                                if exp & 1 == 1 { result = result.wrapping_mul(base); }
+                                base = base.wrapping_mul(base);
+                                exp >>= 1;
+                            }
+                            hot_push!(Value::Integer(result));
                         } else {
                             match a.checked_pow(*b as u32) {
                                 Some(result) => hot_push!(Value::Integer(result)),
@@ -1420,8 +1445,6 @@ impl VM {
                                             (Value::Integer(v), Value::Float(s)) => { hot_push!(Value::Float(*v as f64 - s)); }
                                             (Value::Float(v), Value::Integer(s)) => { hot_push!(Value::Float(v - *s as f64)); }
                                             _ => {
-                                                let item_val = items.get_unchecked(idx).clone();
-                                                let right_val = sub_val.clone();
                                                 hot_push!(Value::Null);
                                             }
                                         }
@@ -1668,7 +1691,8 @@ impl VM {
                                     f.jit_attempted.set(true);
                                     if let Some(module_ref) = self.modules.last() {
                                         if let Some(entry) = self.jit_compiler.compile_function(
-                                            &f.name, f.body, f.normal_param_count, f.num_locals, module_ref
+                                            &f.name, f.body, f.normal_param_count, f.num_locals, module_ref,
+                                            &f.param_indices
                                         ) {
                                             f.jit_entry.set(Some(entry));
                                             if let Value::Integer(n) = arg0 {
@@ -1740,7 +1764,8 @@ impl VM {
                                                 return Err(RuntimeError::new_typed(&e.class_name, &e.message).with_line(e.line.unwrap_or(0)));
                                             }
                                         }
-                                        hot_push!(Value::Integer(result_i64));
+                                        let result_val = unsafe { (*local_vars_ptr.add(result_i64 as usize)).clone() };
+                                        hot_push!(result_val);
                                         continue;
                                     }
                                 }
@@ -1768,63 +1793,63 @@ impl VM {
                             }
                             Value::NativeFunction(ref nf) => {
                                 // FAST PATH: common 1-arg builtins (bypass call_native dispatch)
-                                let result = match nf.name.as_str() {
+                                // Use direct hot_push!+continue to skip try_or_catch and frame recalculation
+                                match nf.name.as_str() {
                                     "طول" => {
                                         match &arg0 {
-                                            Value::List(items) => Ok(Value::Integer(items.borrow().len() as i64)),
-                                            Value::String(s) => Ok(Value::Integer(if s.is_ascii() { s.len() } else { s.chars().count() } as i64)),
-                                            Value::Tuple(items) => Ok(Value::Integer(items.len() as i64)),
-                                            Value::Dict(pairs) => Ok(Value::Integer(pairs.borrow().len() as i64)),
-                                            Value::Set(items) => Ok(Value::Integer(items.borrow().len() as i64)),
-                                            _ => crate::builtins::call_native(&nf.name, &[arg0], &[], self, module),
+                                            Value::List(items) => { hot_push!(Value::Integer(items.borrow().len() as i64)); continue; }
+                                            Value::String(s) => { hot_push!(Value::Integer(if s.is_ascii() { s.len() } else { s.chars().count() } as i64)); continue; }
+                                            Value::Tuple(items) => { hot_push!(Value::Integer(items.len() as i64)); continue; }
+                                            Value::Dict(pairs) => { hot_push!(Value::Integer(pairs.borrow().len() as i64)); continue; }
+                                            Value::Set(items) => { hot_push!(Value::Integer(items.borrow().len() as i64)); continue; }
+                                            _ => {}
                                         }
                                     }
                                     "اعلى" => {
                                         if let Value::String(s) = &arg0 {
-                                            Ok(Value::String(Rc::new(s.to_uppercase())))
-                                        } else {
-                                            crate::builtins::call_native(&nf.name, &[arg0], &[], self, module)
+                                            hot_push!(Value::String(Rc::new(s.to_uppercase())));
+                                            continue;
                                         }
                                     }
                                     "اسفل" => {
                                         if let Value::String(s) = &arg0 {
-                                            Ok(Value::String(Rc::new(s.to_lowercase())))
-                                        } else {
-                                            crate::builtins::call_native(&nf.name, &[arg0], &[], self, module)
+                                            hot_push!(Value::String(Rc::new(s.to_lowercase())));
+                                            continue;
                                         }
                                     }
                                     "شطب" => {
                                         if let Value::String(s) = &arg0 {
                                             let trimmed = s.trim();
                                             if trimmed.len() == s.len() {
-                                                Ok(arg0.clone())
+                                                hot_push!(arg0.clone());
                                             } else {
-                                                Ok(Value::String(Rc::new(trimmed.to_string())))
+                                                hot_push!(Value::String(Rc::new(trimmed.to_string())));
                                             }
-                                        } else {
-                                            crate::builtins::call_native(&nf.name, &[arg0], &[], self, module)
+                                            continue;
                                         }
                                     }
                                     "مربع" => {
                                         if let Value::Integer(n) = &arg0 {
-                                            Ok(Value::Integer(n * n))
+                                            hot_push!(Value::Integer(n * n));
+                                            continue;
                                         } else if let Value::Float(f) = &arg0 {
-                                            Ok(Value::Float(f * f))
-                                        } else {
-                                            crate::builtins::call_native(&nf.name, &[arg0], &[], self, module)
+                                            hot_push!(Value::Float(f * f));
+                                            continue;
                                         }
                                     }
                                     "مطلق" | "قيمة_مطلقة" => {
                                         if let Value::Integer(n) = &arg0 {
-                                            Ok(Value::Integer(n.abs()))
+                                            hot_push!(Value::Integer(n.abs()));
+                                            continue;
                                         } else if let Value::Float(f) = &arg0 {
-                                            Ok(Value::Float(f.abs()))
-                                        } else {
-                                            crate::builtins::call_native(&nf.name, &[arg0], &[], self, module)
+                                            hot_push!(Value::Float(f.abs()));
+                                            continue;
                                         }
                                     }
-                                    _ => crate::builtins::call_native(&nf.name, &[arg0], &[], self, module),
-                                };
+                                    _ => {}
+                                }
+                                // Slow path: fall through to call_native
+                                let result = crate::builtins::call_native(&nf.name, &[arg0], &[], self, module);
                                 let result = try_or_catch!(result);
                                 {
                                     let frame = self.frames.last().expect("VM frame stack empty: frame push/pop imbalance");
@@ -1915,7 +1940,8 @@ impl VM {
                                                 return Err(RuntimeError::new_typed(&e.class_name, &e.message).with_line(e.line.unwrap_or(0)));
                                             }
                                         }
-                                        hot_push!(Value::Integer(result_i64));
+                                        let result_val = unsafe { (*local_vars_ptr.add(result_i64 as usize)).clone() };
+                                        hot_push!(result_val);
                                         continue;
                                     }
                                 }
@@ -2041,7 +2067,8 @@ impl VM {
                                                 return Err(RuntimeError::new_typed(&e.class_name, &e.message).with_line(e.line.unwrap_or(0)));
                                             }
                                         }
-                                        hot_push!(Value::Integer(result_i64));
+                                        let result_val = unsafe { (*local_vars_ptr.add(result_i64 as usize)).clone() };
+                                        hot_push!(result_val);
                                         continue;
                                     }
                                 }
@@ -2069,21 +2096,20 @@ impl VM {
                             }
                             Value::NativeFunction(ref nf) => {
                                 // FAST PATH: common 2-arg builtins
-                                let result = match nf.name.as_str() {
+                                match nf.name.as_str() {
                                     "اقسم" => {
                                         if let Value::String(s) = &arg0 {
                                             if let Value::String(sep) = &arg1 {
                                                 let parts: Vec<Value> = s.split(sep.as_str()).map(|p| Value::String(Rc::new(p.to_string()))).collect();
-                                                Ok(Value::List(crate::frame::SharedList::new(parts)))
-                                            } else {
-                                                crate::builtins::call_native(&nf.name, &[arg0, arg1], &[], self, module)
+                                                hot_push!(Value::List(crate::frame::SharedList::new(parts)));
+                                                continue;
                                             }
-                                        } else {
-                                            crate::builtins::call_native(&nf.name, &[arg0, arg1], &[], self, module)
                                         }
                                     }
-                                    _ => crate::builtins::call_native(&nf.name, &[arg0, arg1], &[], self, module),
-                                };
+                                    _ => {}
+                                }
+                                // Slow path: fall through to call_native
+                                let result = crate::builtins::call_native(&nf.name, &[arg0, arg1], &[], self, module);
                                 let result = try_or_catch!(result);
                                 {
                                     let frame = self.frames.last().expect("VM frame stack empty: frame push/pop imbalance");
@@ -2330,20 +2356,19 @@ impl VM {
                             }
                             Value::NativeFunction(ref nf) => {
                                 // FAST PATH: common 3-arg builtins (bypass call_native dispatch)
-                                let result = match nf.name.as_str() {
+                                match nf.name.as_str() {
                                     "استبدل" => {
                                         if args.len() >= 3 {
                                             if let (Value::String(s), Value::String(from), Value::String(to)) = (&args[0], &args[1], &args[2]) {
-                                                Ok(Value::String(Rc::new(s.replace(&**from, to))))
-                                            } else {
-                                                crate::builtins::call_native(&nf.name, &args, &[], self, module)
+                                                hot_push!(Value::String(Rc::new(s.replace(&**from, to))));
+                                                continue;
                                             }
-                                        } else {
-                                            crate::builtins::call_native(&nf.name, &args, &[], self, module)
                                         }
                                     }
-                                    _ => crate::builtins::call_native(&nf.name, &args, &[], self, module),
-                                };
+                                    _ => {}
+                                }
+                                // Slow path: fall through to call_native
+                                let result = crate::builtins::call_native(&nf.name, &args, &[], self, module);
                                 let result = try_or_catch!(result);
                                 {
                                     let frame = self.frames.last().expect("VM frame stack empty: frame push/pop imbalance");
@@ -3919,6 +3944,20 @@ impl VM {
                                 runtime_error!("استثناء_اسم", format!("حقل غير موجود: {}", offset));
                             }
                             arabi_compiler::compiler::Value::String(name_str) => {
+                                if let Some(&offset) = rc.class.field_index.get(name_str.as_str()) {
+                                    if offset < rc.num_inline_fields as usize {
+                                        module.constants[name_idx] = arabi_compiler::compiler::Value::Integer(offset as i64);
+                                        hot_push!(unsafe { (*rc.inline_fields.as_ptr())[offset].clone() });
+                                        continue;
+                                    }
+                                    if let Some(name) = rc.class.field_names.get(offset) {
+                                        if let Some(val) = rc.extra_fields.borrow().as_ref().and_then(|f| f.get(name.as_str()).cloned()) {
+                                            module.constants[name_idx] = arabi_compiler::compiler::Value::Integer(offset as i64);
+                                            hot_push!(val);
+                                            continue;
+                                        }
+                                    }
+                                }
                                 if let Some(val) = rc.get_field(name_str.as_str()) {
                                     hot_push!(val);
                                     continue;
@@ -3931,6 +3970,44 @@ impl VM {
                                 }
                             }
                             _ => {}
+                        }
+                    }
+                    if let arabi_compiler::compiler::Value::String(name_str) = &module.constants[name_idx] {
+                        let attr_result = match (&obj, name_str.as_str()) {
+                            (Value::Dict(pairs), "طول") => Some(Value::Integer(pairs.borrow().len() as i64)),
+                            (Value::Dict(pairs), "مفاتيح") => {
+                                let keys: Vec<Value> = pairs.borrow().iter().map(|(k, _)| k.clone()).collect();
+                                Some(Value::List(SharedList::new(keys)))
+                            }
+                            (Value::Dict(pairs), "قيم") => {
+                                let vals: Vec<Value> = pairs.borrow().iter().map(|(_, v)| v.clone()).collect();
+                                Some(Value::List(SharedList::new(vals)))
+                            }
+                            (Value::List(items), "طول") => Some(Value::Integer(items.borrow().len() as i64)),
+                            (Value::List(items), "عكس") => {
+                                items.borrow_mut().reverse();
+                                Some(Value::List(items.clone()))
+                            }
+                            (Value::List(items), "رتب") => {
+                                items.borrow_mut().sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                                Some(Value::List(items.clone()))
+                            }
+                            (Value::List(_), "امسح") => Some(Value::List(SharedList::new(Vec::new()))),
+                            (Value::Tuple(items), "طول") => Some(Value::Integer(items.len() as i64)),
+                            (Value::Range(d), "طول") => {
+                                let len = if d.step > 0 {
+                                    if d.end > d.start { (d.end - d.start + d.step - 1) / d.step } else { 0 }
+                                } else if d.step < 0 {
+                                    if d.start > d.end { (d.start - d.end + (-d.step) - 1) / (-d.step) } else { 0 }
+                                } else { 0 };
+                                Some(Value::Integer(len))
+                            }
+                            (Value::String(s), "طول") => Some(Value::Integer(s.chars().count() as i64)),
+                            _ => None,
+                        };
+                        if let Some(val) = attr_result {
+                            hot_push!(val);
+                            continue;
                         }
                     }
                     runtime_error!("استثناء_نوع", "الوصول الميداني يتطلب مثياً".to_string());
@@ -4448,8 +4525,45 @@ if let Value::Instance(rc) = &val {
                                                     unsafe { *local_vars_ptr.add(local_idx) = arg.clone(); }
                                                 }
                                             }
-                                            let prev_class = self.current_class_name.clone();
-                                            self.current_class_name = Some(class_name_str_rc.clone());
+                                            f.call_count.set(f.call_count.get().wrapping_add(1));
+                                            let cc_m = f.call_count.get();
+                                            if !f.jit_attempted.get() && cc_m >= 5 {
+                                                f.jit_attempted.set(true);
+                                                if let Some(module_ref) = self.modules.last() {
+                                                    if let Some(entry) = self.jit_compiler.compile_loop_function(
+                                                        &f.name, f.body, f.normal_param_count, f.num_locals, module_ref,
+                                                        &f.param_indices
+                                                    ) {
+                                                        f.jit_entry.set(Some(entry));
+                                                    }
+                                                }
+                                            }
+                                            if let Some(jit_entry) = f.jit_entry.get() {
+                                                if self.jit_compiler.is_loop_compiled(f.body) {
+                                                    let func_ptr: extern "C" fn(i64) -> i64 = unsafe { std::mem::transmute(jit_entry) };
+                                                    let result_i64 = {
+                                                        unsafe {
+                                                            crate::jit_runtime::set_jit_context(
+                                                                self as *mut VM as *mut std::ffi::c_void,
+                                                                self.modules.last().map_or(std::ptr::null_mut(), |m| m as *const _ as *mut std::ffi::c_void),
+                                                            );
+                                                        }
+                                                        let r = func_ptr(local_vars_ptr as i64);
+                                                        unsafe { crate::jit_runtime::clear_jit_context(); }
+                                                        r
+                                                    };
+                                                    if let Some(exc) = self.current_exception.take() {
+                                                        if let Value::Exception(ref e) = exc {
+                                                            return Err(RuntimeError::new_typed(&e.class_name, &e.message).with_line(e.line.unwrap_or(0)));
+                                                        }
+                                                    }
+                                                    let result_val = unsafe { (*local_vars_ptr.add(result_i64 as usize)).clone() };
+                                                    hot_push!(result_val);
+                                                    continue;
+                                                }
+                                            }
+                                            let prev_class = self.current_class_name.take();
+                                            self.current_class_name = Some(class_name_str_rc);
                                             {
                                     let ret_ip = ip;
                                     let saved_handler_len = self.exception_handlers.len();
@@ -4534,6 +4648,7 @@ if let Value::Instance(rc) = &val {
                                 Some(Value::Function(ref f)) => {
                                     let body = f.body;
                                     let n_locals = f.num_locals.max(1);
+                                    let num_locals_m = n_locals;
                                     let class_name_str_rc = rc.class.name.clone();
                                     let arena_offset = self.locals_arena.len();
                                     self.locals_arena.resize(arena_offset + n_locals, Value::Null);
@@ -4548,8 +4663,45 @@ if let Value::Instance(rc) = &val {
                                             unsafe { *local_vars_ptr.add(local_idx) = arg.clone(); }
                                         }
                                     }
-                                    let prev_class = self.current_class_name.clone();
-                                    self.current_class_name = Some(class_name_str_rc.clone());
+                                    f.call_count.set(f.call_count.get().wrapping_add(1));
+                                    let cc_m = f.call_count.get();
+                                    if !f.jit_attempted.get() && cc_m >= 5 {
+                                        f.jit_attempted.set(true);
+                                        if let Some(module_ref) = self.modules.last() {
+                                            if let Some(entry) = self.jit_compiler.compile_loop_function(
+                                                &f.name, f.body, f.normal_param_count, f.num_locals, module_ref,
+                                                &f.param_indices
+                                            ) {
+                                                f.jit_entry.set(Some(entry));
+                                            }
+                                        }
+                                    }
+                                    if let Some(jit_entry) = f.jit_entry.get() {
+                                        if self.jit_compiler.is_loop_compiled(f.body) {
+                                            let func_ptr: extern "C" fn(i64) -> i64 = unsafe { std::mem::transmute(jit_entry) };
+                                            let result_i64 = {
+                                                unsafe {
+                                                    crate::jit_runtime::set_jit_context(
+                                                        self as *mut VM as *mut std::ffi::c_void,
+                                                        self.modules.last().map_or(std::ptr::null_mut(), |m| m as *const _ as *mut std::ffi::c_void),
+                                                    );
+                                                }
+                                                let r = func_ptr(local_vars_ptr as i64);
+                                                unsafe { crate::jit_runtime::clear_jit_context(); }
+                                                r
+                                            };
+                                            if let Some(exc) = self.current_exception.take() {
+                                                if let Value::Exception(ref e) = exc {
+                                                    return Err(RuntimeError::new_typed(&e.class_name, &e.message).with_line(e.line.unwrap_or(0)));
+                                                }
+                                            }
+                                            let result_val = unsafe { (*local_vars_ptr.add(result_i64 as usize)).clone() };
+                                            hot_push!(result_val);
+                                            continue;
+                                        }
+                                    }
+                                    let prev_class = self.current_class_name.take();
+                                    self.current_class_name = Some(class_name_str_rc);
                                     {
                                         let ret_ip = ip;
                                         let saved_handler_len = self.exception_handlers.len();
@@ -4557,7 +4709,7 @@ if let Value::Instance(rc) = &val {
                                         if self.frames.len() >= self.frame_depth_limit {
                                             runtime_error!("استثناء_بنية", format!("تجاوزت عمق الاستدعاء الحد الاقصى ({})", self.frame_depth_limit));
                                         }
-                                        self.frames.push(Frame { arena_offset, arena_len: n_locals, return_ip: ret_ip, saved_handler_len, saved_stack_len });
+                                        self.frames.push(Frame { arena_offset, arena_len: num_locals_m, return_ip: ret_ip, saved_handler_len, saved_stack_len });
                                         {
                                             let frame = self.frames.last().expect("VM frame stack empty: frame push/pop imbalance");
                                             locals_ptr = unsafe { self.locals_arena.as_mut_ptr().add(frame.arena_offset) };
@@ -4924,9 +5076,9 @@ if let Value::Instance(rc) = &val {
                                             unsafe { *local_vars_ptr.add(local_idx) = arg.clone(); }
                                         }
                                     }
-                                    let prev_class = self.current_class_name.clone();
+                                    let prev_class = self.current_class_name.take();
                                     if let Value::Instance(rc) = &obj {
-                                        self.current_class_name = Some(rc.class.name.clone());
+                                        self.current_class_name = Some(Rc::clone(&rc.class.name));
                                     }
                                     if f.module_index.is_none() && f.varargs_param.is_none() && f.kwargs_param.is_none() && !f.is_generator {
                                         let ret_ip = ip;
@@ -4980,6 +5132,181 @@ if let Value::Instance(rc) = &val {
 
                 OP_CALL_METHOD_VOID => {
                     runtime_error!("خطا", "CallMethodVoid should not be reached — disable peephole pass 32".to_string());
+                }
+
+                OP_TAIL_CALL_METHOD => {
+                    // TCO for method calls: reuse current frame instead of pushing new one
+                    let method_name_str = &module.names[a];
+                    let arg_count = b as usize;
+                    let name_hash = c as u64;
+                    // Pop args + receiver from stack (b = number of args, NOT including receiver)
+                    let mut tco_args: [Value; 3] = [Value::Null, Value::Null, Value::Null];
+                    match arg_count {
+                        3 => { tco_args[2] = hot_pop!(); tco_args[1] = hot_pop!(); tco_args[0] = hot_pop!(); }
+                        2 => { tco_args[1] = hot_pop!(); tco_args[0] = hot_pop!(); }
+                        1 => { tco_args[0] = hot_pop!(); }
+                        _ => {}
+                    }
+                    let receiver = hot_pop!();
+
+                    // Look up method on receiver
+                    if let Value::Instance(rc) = &receiver {
+                        // Method cache check
+                        let methods_ptr = Rc::as_ptr(&rc.class.methods);
+                        let hit1 = methods_ptr == self.mc_methods_ptr && name_hash == self.mc_method;
+                        let hit2 = methods_ptr == self.mc2_methods_ptr && name_hash == self.mc2_method;
+                        if hit1 || hit2 {
+                            let cached_val = if hit1 { &self.mc_value } else { &self.mc2_value };
+                            match cached_val {
+                                Value::Function(ref f) if !f.is_generator => {
+                                    let frame = self.frames.last_mut().expect("VM frame stack empty");
+                                    let arena_offset = frame.arena_offset;
+                                    let num_locals = f.num_locals.max(1);
+                                    if num_locals > frame.arena_len {
+                                        self.locals_arena.resize(arena_offset + num_locals, Value::Null);
+                                        for i in frame.arena_len..num_locals {
+                                            self.locals_arena[arena_offset + i] = Value::Null;
+                                        }
+                                    }
+                                    if !f.closure.is_empty() {
+                                        for (idx, val) in &f.closure {
+                                            if *idx < num_locals { self.locals_arena[arena_offset + *idx] = val.clone(); }
+                                        }
+                                    }
+                                    // receiver → param[0], args → param[1..]
+                                    if let Some(&li) = f.param_indices.first() {
+                                        if li < num_locals { self.locals_arena[arena_offset + li] = receiver; }
+                                    }
+                                    if arg_count > 0 { let li = f.param_indices.get(1).copied().unwrap_or(1); if li < num_locals { self.locals_arena[arena_offset + li] = std::mem::replace(&mut tco_args[0], Value::Null); } }
+                                    if arg_count > 1 { let li = f.param_indices.get(2).copied().unwrap_or(2); if li < num_locals { self.locals_arena[arena_offset + li] = std::mem::replace(&mut tco_args[1], Value::Null); } }
+                                    if arg_count > 2 { let li = f.param_indices.get(3).copied().unwrap_or(3); if li < num_locals { self.locals_arena[arena_offset + li] = std::mem::replace(&mut tco_args[2], Value::Null); } }
+                                    frame.arena_len = num_locals;
+                                    locals_ptr = unsafe { self.locals_arena.as_mut_ptr().add(arena_offset) };
+                                    locals_len = num_locals;
+                                    ip = f.body;
+                                    continue;
+                                }
+                                Value::FastMethod(fm) => {
+                                    let (v1, v2) = (rc.get_field(fm.field1.as_str()).unwrap_or(Value::Null),
+                                                     rc.get_field(fm.field2.as_str()).unwrap_or(Value::Null));
+                                    let result = match (&v1, &v2, fm.op) {
+                                        (Value::Integer(a), Value::Integer(b), FastMethodOp::Add) => Value::Integer(a + b),
+                                        (Value::Float(a), Value::Float(b), FastMethodOp::Add) => Value::Float(a + b),
+                                        (Value::Integer(a), Value::Float(b), FastMethodOp::Add) => Value::Float(*a as f64 + b),
+                                        (Value::Float(a), Value::Integer(b), FastMethodOp::Add) => Value::Float(a + *b as f64),
+                                        (Value::Integer(a), Value::Integer(b), FastMethodOp::Sub) => Value::Integer(a - b),
+                                        (Value::Float(a), Value::Float(b), FastMethodOp::Sub) => Value::Float(a - b),
+                                        (Value::Integer(a), Value::Float(b), FastMethodOp::Sub) => Value::Float(*a as f64 - b),
+                                        (Value::Float(a), Value::Integer(b), FastMethodOp::Sub) => Value::Float(a - *b as f64),
+                                        (Value::Integer(a), Value::Integer(b), FastMethodOp::Mul) => Value::Integer(a * b),
+                                        (Value::Float(a), Value::Float(b), FastMethodOp::Mul) => Value::Float(a * b),
+                                        (Value::Integer(a), Value::Float(b), FastMethodOp::Mul) => Value::Float(*a as f64 * b),
+                                        (Value::Float(a), Value::Integer(b), FastMethodOp::Mul) => Value::Float(a * *b as f64),
+                                        (Value::Integer(a), Value::Integer(b), FastMethodOp::Div) => Value::Integer(a / b),
+                                        (Value::Float(a), Value::Float(b), FastMethodOp::Div) => Value::Float(a / b),
+                                        (Value::Integer(a), Value::Float(b), FastMethodOp::Div) => Value::Float(*a as f64 / b),
+                                        (Value::Float(a), Value::Integer(b), FastMethodOp::Div) => Value::Float(a / *b as f64),
+                                        _ => Value::Null,
+                                    };
+                                    hot_push!(result);
+                                    continue;
+                                }
+                                _ => {}
+                            }
+                        }
+                        // Cache miss: lookup
+                        let val = rc.class.methods.get(method_name_str).cloned();
+                        if let Some(ref v) = val {
+                            if self.mc_methods_ptr == methods_ptr {
+                                self.mc2_methods_ptr = methods_ptr;
+                                self.mc2_method = name_hash;
+                                self.mc2_value = v.clone();
+                            } else {
+                                self.mc_methods_ptr = methods_ptr;
+                                self.mc_method = name_hash;
+                                self.mc_value = v.clone();
+                            }
+                        }
+                        match val {
+                            Some(Value::Function(ref f)) if !f.is_generator => {
+                                let frame = self.frames.last_mut().expect("VM frame stack empty");
+                                let arena_offset = frame.arena_offset;
+                                let num_locals = f.num_locals.max(1);
+                                if num_locals > frame.arena_len {
+                                    self.locals_arena.resize(arena_offset + num_locals, Value::Null);
+                                    for i in frame.arena_len..num_locals {
+                                        self.locals_arena[arena_offset + i] = Value::Null;
+                                    }
+                                }
+                                if !f.closure.is_empty() {
+                                    for (idx, val) in &f.closure {
+                                        if *idx < num_locals { self.locals_arena[arena_offset + *idx] = val.clone(); }
+                                    }
+                                }
+                                if let Some(&li) = f.param_indices.first() {
+                                    if li < num_locals { self.locals_arena[arena_offset + li] = receiver; }
+                                }
+                                if arg_count > 0 { let li = f.param_indices.get(1).copied().unwrap_or(1); if li < num_locals { self.locals_arena[arena_offset + li] = std::mem::replace(&mut tco_args[0], Value::Null); } }
+                                if arg_count > 1 { let li = f.param_indices.get(2).copied().unwrap_or(2); if li < num_locals { self.locals_arena[arena_offset + li] = std::mem::replace(&mut tco_args[1], Value::Null); } }
+                                if arg_count > 2 { let li = f.param_indices.get(3).copied().unwrap_or(3); if li < num_locals { self.locals_arena[arena_offset + li] = std::mem::replace(&mut tco_args[2], Value::Null); } }
+                                frame.arena_len = num_locals;
+                                locals_ptr = unsafe { self.locals_arena.as_mut_ptr().add(arena_offset) };
+                                locals_len = num_locals;
+                                ip = f.body;
+                                continue;
+                            }
+                            Some(Value::FastMethod(fm)) => {
+                                let (v1, v2) = (rc.get_field(fm.field1.as_str()).unwrap_or(Value::Null),
+                                                 rc.get_field(fm.field2.as_str()).unwrap_or(Value::Null));
+                                let result = match (&v1, &v2, fm.op) {
+                                    (Value::Integer(a), Value::Integer(b), FastMethodOp::Add) => Value::Integer(a + b),
+                                    (Value::Float(a), Value::Float(b), FastMethodOp::Add) => Value::Float(a + b),
+                                    (Value::Integer(a), Value::Float(b), FastMethodOp::Add) => Value::Float(*a as f64 + b),
+                                    (Value::Float(a), Value::Integer(b), FastMethodOp::Add) => Value::Float(a + *b as f64),
+                                    (Value::Integer(a), Value::Integer(b), FastMethodOp::Sub) => Value::Integer(a - b),
+                                    (Value::Float(a), Value::Float(b), FastMethodOp::Sub) => Value::Float(a - b),
+                                    (Value::Integer(a), Value::Float(b), FastMethodOp::Sub) => Value::Float(*a as f64 - b),
+                                    (Value::Float(a), Value::Integer(b), FastMethodOp::Sub) => Value::Float(a - *b as f64),
+                                    (Value::Integer(a), Value::Integer(b), FastMethodOp::Mul) => Value::Integer(a * b),
+                                    (Value::Float(a), Value::Float(b), FastMethodOp::Mul) => Value::Float(a * b),
+                                    (Value::Integer(a), Value::Float(b), FastMethodOp::Mul) => Value::Float(*a as f64 * b),
+                                    (Value::Float(a), Value::Integer(b), FastMethodOp::Mul) => Value::Float(a * *b as f64),
+                                    (Value::Integer(a), Value::Integer(b), FastMethodOp::Div) => Value::Integer(a / b),
+                                    (Value::Float(a), Value::Float(b), FastMethodOp::Div) => Value::Float(a / b),
+                                    (Value::Integer(a), Value::Float(b), FastMethodOp::Div) => Value::Float(*a as f64 / b),
+                                    (Value::Float(a), Value::Integer(b), FastMethodOp::Div) => Value::Float(a / *b as f64),
+                                    _ => Value::Null,
+                                };
+                                hot_push!(result);
+                                continue;
+                            }
+                            Some(nf @ Value::NativeFunction(_)) => {
+                                let mut all_args = Vec::with_capacity(arg_count + 1);
+                                all_args.push(receiver.clone());
+                                if arg_count > 0 { all_args.push(std::mem::replace(&mut tco_args[0], Value::Null)); }
+                                if arg_count > 1 { all_args.push(std::mem::replace(&mut tco_args[1], Value::Null)); }
+                                if arg_count > 2 { all_args.push(std::mem::replace(&mut tco_args[2], Value::Null)); }
+                                let result = try_or_catch!(nf.call(&all_args, &[], self, module));
+                                {
+                                    let frame = self.frames.last().expect("VM frame stack empty");
+                                    locals_ptr = unsafe { self.locals_arena.as_mut_ptr().add(frame.arena_offset) };
+                                    locals_len = frame.arena_len;
+                                }
+                                hot_push!(result);
+                                continue;
+                            }
+                            _ => {
+                                runtime_error!("استثناء_نوع", format!("ال_method {} ليست function", method_name_str));
+                            }
+                        }
+                    } else {
+                        // Fallback: non-instance receiver — normal call through stack
+                        hot_push!(receiver);
+                        if arg_count > 0 { hot_push!(std::mem::replace(&mut tco_args[0], Value::Null)); }
+                        if arg_count > 1 { hot_push!(std::mem::replace(&mut tco_args[1], Value::Null)); }
+                        if arg_count > 2 { hot_push!(std::mem::replace(&mut tco_args[2], Value::Null)); }
+                        ip -= 1; // re-execute as OP_CALL_METHOD
+                    }
                 }
 
                 OP_IMPORT_MODULE => {

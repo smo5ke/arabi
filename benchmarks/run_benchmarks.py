@@ -1,7 +1,7 @@
 import sys, io, subprocess, time, os, glob
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
-ARABI_CLI = 'target/release/arabi-cli.exe'
+ARABI_CLI = 'target/release/arabi.exe'
 BENCH_DIR = 'benchmarks'
 
 results = []

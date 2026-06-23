@@ -1333,13 +1333,6 @@ impl Parser {
         }
     }
 
-    fn consume_newline(&mut self) -> Result<()> {
-        if self.check(&Token::Newline) {
-            self.advance();
-        }
-        Ok(())
-    }
-
     fn check(&self, token: &Token) -> bool {
         self.current() == token
     }

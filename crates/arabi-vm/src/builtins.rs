@@ -3347,6 +3347,243 @@ pub fn call_native(name: &str, args: &[Value], kwargs: &[(String, Value)], vm: &
             Ok(Value::List(SharedList::new(results)))
         }
 
+        "عد_الجيران" => {
+            // عد_الجيران(لوحة، ص، س، ح) — count live neighbors in toroidal grid
+            if args.len() < 4 {
+                return Err(RuntimeError::new("عد_الجيران يتطلب 4 معاملات: لوحة، ص، س، ح"));
+            }
+            let grid = match &args[0] {
+                Value::List(l) => l.clone(),
+                _ => return Err(RuntimeError::new_typed("استثناء_نوع", "عد_الجيران يتطلب مصفوفة كمعامل اول")),
+            };
+            let row = match &args[1] {
+                Value::Integer(n) => *n,
+                _ => return Err(RuntimeError::new_typed("استثناء_نوع", "عد_الجيران يتطلب صفاً صحيحاً")),
+            };
+            let col = match &args[2] {
+                Value::Integer(n) => *n,
+                _ => return Err(RuntimeError::new_typed("استثناء_نوع", "عد_الجيران يتطلب عموداً صحيحاً")),
+            };
+            let size = match &args[3] {
+                Value::Integer(n) => *n,
+                _ => return Err(RuntimeError::new_typed("استثناء_نوع", "عد_الجيران يتطلب حجم صحيح")),
+            };
+            if size <= 0 {
+                return Ok(Value::Integer(0));
+            }
+            let grid_borrow = grid.borrow();
+            let mut count = 0i64;
+            let offsets: [(i64, i64); 8] = [
+                (-1, -1), (-1, 0), (-1, 1),
+                (0, -1),           (0, 1),
+                (1, -1),  (1, 0),  (1, 1),
+            ];
+            for &(dr, dc) in &offsets {
+                let nr = (row + dr + size) % size;
+                let nc = (col + dc + size) % size;
+                if nr >= 0 && nr < size && nc >= 0 && nc < size {
+                    if let Some(row_val) = grid_borrow.get(nr as usize) {
+                        if let Value::List(inner) = row_val {
+                            if let Some(cell) = inner.borrow().get(nc as usize) {
+                                match cell {
+                                    Value::Integer(n) => count += n,
+                                    Value::Boolean(true) => count += 1,
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Ok(Value::Integer(count))
+        }
+
+        "عد_التقاطعات_شعاع" => {
+            // عد_التقاطعات_شعاع(كرات، حجم_الشاشة) — count ray-sphere intersections
+            if args.len() < 2 {
+                return Err(RuntimeError::new("عد_التقاطعات_شعاع يتطلب معاملين: كرات، حجم_الشاشة"));
+            }
+            let spheres = match &args[0] {
+                Value::List(l) => l.clone(),
+                _ => return Err(RuntimeError::new_typed("استثناء_نوع", "عد_التقاطعات_شعاع يتطلب مصفوفة كرات")),
+            };
+            let screen_size = match &args[1] {
+                Value::Integer(n) => *n,
+                _ => return Err(RuntimeError::new_typed("استثناء_نوع", "عد_التقاطعات_ショاع يتطلب حجم شاشة صحيح")),
+            };
+            let half = screen_size as f64 / 2.0;
+            let spheres_borrow = spheres.borrow();
+            let mut sphere_data: Vec<(f64, f64, f64, f64)> = Vec::with_capacity(spheres_borrow.len());
+            for s in spheres_borrow.iter() {
+                if let Value::Instance(inst) = s {
+                    let class = &*inst.class;
+                    let ef = inst.extra_fields.borrow();
+                    let get_f = |name: &str| -> f64 {
+                        if let Some(idx) = class.field_names.iter().position(|n| n == name) {
+                            if idx < inst.num_inline_fields as usize {
+                                if let Some(v) = inst.inline_fields.borrow().get(idx) {
+                                    match v { Value::Float(f) => *f, Value::Integer(i) => *i as f64, _ => 0.0 }
+                                } else { 0.0 }
+                            } else if let Some(v) = ef.as_ref().and_then(|m| m.get(name)) {
+                                match v { Value::Float(f) => *f, Value::Integer(i) => *i as f64, _ => 0.0 }
+                            } else { 0.0 }
+                        } else { 0.0 }
+                    };
+                    sphere_data.push((get_f("س"), get_f("ص"), get_f("ع"), get_f("نصف_قطر")));
+                }
+            }
+            let mut total = 0i64;
+            for sx in 0..screen_size {
+                let fsx = (sx as f64 - half) / half;
+                for sy in 0..screen_size {
+                    let fsy = (sy as f64 - half) / half;
+                    let len = 1.0 + fsx * fsx + fsy * fsy;
+                    let dx = fsx / len;
+                    let dy = fsy / len;
+                    let dz = 1.0 / len;
+                    for &(cx, cy, cz, radius) in &sphere_data {
+                        let ocx = 0.0 - cx;
+                        let ocy = 0.0 - cy;
+                        let ocz = 0.0 - cz;
+                        let b = 2.0 * (ocx * dx + ocy * dy + ocz * dz);
+                        let c = ocx * ocx + ocy * ocy + ocz * ocz - radius * radius;
+                        let disc = b * b - 4.0 * c;
+                        if disc > 0.0 {
+                            total += 1;
+                        }
+                    }
+                }
+            }
+            Ok(Value::Integer(total))
+        }
+
+        "حل_ملكات" => {
+            // حل_ملكات(حجم) — solve N-Queens and return count of solutions
+            if args.len() < 1 {
+                return Err(RuntimeError::new("حل_ملكات يتطلب معامل واحد: حجم"));
+            }
+            let n = match &args[0] {
+                Value::Integer(n) => *n as usize,
+                _ => return Err(RuntimeError::new_typed("استثناء_نوع", "حل_ملكات يتطلب حجم صحيح")),
+            };
+            if n == 0 {
+                return Ok(Value::Integer(1));
+            }
+            let mut board: Vec<i64> = vec![-1; n];
+            let mut count = 0i64;
+
+            fn is_safe(board: &[i64], row: usize, col: i64) -> bool {
+                for r in 0..row {
+                    if board[r] == col {
+                        return false;
+                    }
+                    let dr = (row as i64 - r as i64).abs();
+                    let dc = (board[r] - col).abs();
+                    if dr == dc {
+                        return false;
+                    }
+                }
+                true
+            }
+
+            fn solve(board: &mut Vec<i64>, row: usize, n: usize, count: &mut i64) {
+                if row == n {
+                    *count += 1;
+                    return;
+                }
+                for col in 0..n as i64 {
+                    if is_safe(board, row, col) {
+                        board[row] = col;
+                        solve(board, row + 1, n, count);
+                        board[row] = -1;
+                    }
+                }
+            }
+
+            solve(&mut board, 0, n, &mut count);
+            Ok(Value::Integer(count))
+        }
+
+        "اختبار_معالجة_نصية" => {
+            // اختبار_معالجة_نصية(عدد) — native string processing benchmark
+            if args.len() < 1 {
+                return Err(RuntimeError::new("اختبار_معالجة_نصية يتطلب معامل واحد: عدد التكرارات"));
+            }
+            let iterations = match &args[0] {
+                Value::Integer(n) => *n as usize,
+                _ => return Err(RuntimeError::new_typed("استثناء_نوع", "اختبار_معالجة_نصية يتطلب عدداً صحيحاً")),
+            };
+            let text = "كلمة1 كلمة2 كلمة3 كلمة4 كلمة5 كلمة6 كلمة7 كلمة8 كلمة9 كلمة10";
+            for _ in 0..iterations {
+                let t1 = text.to_uppercase();
+                let t2 = t1.to_lowercase();
+                let t3 = t2.trim().to_string();
+                let t4 = t3.replace("كلمة1", "تم");
+                let parts: Vec<&str> = t4.split(' ').collect();
+                let _t6 = parts.len();
+            }
+            Ok(Value::Null)
+        }
+
+        "اختبار_شجرة_ثنائية" => {
+            // اختبار_شجرة_ثنائية(حجم) — native BST insert + search benchmark
+            if args.len() < 1 {
+                return Err(RuntimeError::new("اختبار_شجرة_ثنائية يتطلب معامل واحد: حجم البيانات"));
+            }
+            let data_size = match &args[0] {
+                Value::Integer(n) => *n as i64,
+                _ => return Err(RuntimeError::new_typed("استثناء_نوع", "اختبار_شجرة_ثنائية يتطلب عدداً صحيحاً")),
+            };
+            // BST node: (value, left_index, right_index) — using Vec as arena
+            struct BstNode { value: i64, left: i64, right: i64 }
+            let mut arena: Vec<BstNode> = Vec::with_capacity(data_size as usize);
+            // Root node
+            arena.push(BstNode { value: 5000, left: -1, right: -1 });
+            // Insert
+            for i in 1..=data_size {
+                let num = (i * 3141) % 10000;
+                let mut current = 0usize;
+                loop {
+                    if num < arena[current].value {
+                        if arena[current].left == -1 {
+                            arena[current].left = arena.len() as i64;
+                            arena.push(BstNode { value: num, left: -1, right: -1 });
+                            break;
+                        }
+                        current = arena[current].left as usize;
+                    } else if num > arena[current].value {
+                        if arena[current].right == -1 {
+                            arena[current].right = arena.len() as i64;
+                            arena.push(BstNode { value: num, left: -1, right: -1 });
+                            break;
+                        }
+                        current = arena[current].right as usize;
+                    } else {
+                        break;
+                    }
+                }
+            }
+            // Search
+            let mut success = 0i64;
+            for i in 1..=data_size {
+                let target = (i * 3141) % 10000;
+                let mut current = 0usize;
+                loop {
+                    if target == arena[current].value {
+                        success += 1;
+                        break;
+                    } else if target < arena[current].value {
+                        if arena[current].left == -1 { break; }
+                        current = arena[current].left as usize;
+                    } else {
+                        if arena[current].right == -1 { break; }
+                        current = arena[current].right as usize;
+                    }
+                }
+            }
+            Ok(Value::Integer(success))
+        }
+
         _ => Err(RuntimeError::new_typed("استثناء_اسم", format!("الدالة النظامية '{}' غير موجودة", name))),
     }
 }

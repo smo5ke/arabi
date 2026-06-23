@@ -27,22 +27,44 @@ struct JitHelpers {
     load_int: FuncRef,
     store_int: FuncRef,
     store_float: FuncRef,
+    store_value: FuncRef,
     for_range_next: FuncRef,
     build_list: FuncRef,
     list_append: FuncRef,
     subscript_int: FuncRef,
     subscript_int_imm: FuncRef,
+    subscript_int_compare: FuncRef,
     store_subscript: FuncRef,
     _store_subscript_add_imm: FuncRef,
     swap_adjacent: FuncRef,
     _subscript_gt: FuncRef,
-    get_time: FuncRef,
-    print_int: FuncRef,
-    print_float: FuncRef,
-    print_sep: FuncRef,
+    _get_time: FuncRef,
+    _print_int: FuncRef,
+    _print_float: FuncRef,
+    _print_sep: FuncRef,
     _print_newline: FuncRef,
     load_global_to_local: FuncRef,
     call_func: FuncRef,
+    binary_add_generic: FuncRef,
+    binary_sub_generic: FuncRef,
+    binary_mul_generic: FuncRef,
+    binary_div_generic: FuncRef,
+    _binary_mod_generic: FuncRef,
+    _compare_generic: FuncRef,
+    get_instance_field: FuncRef,
+    set_instance_field: FuncRef,
+    get_field_by_name_slot: FuncRef,
+    store_attr: FuncRef,
+    subscript_generic: FuncRef,
+    store_subscript_generic: FuncRef,
+    _call_method: FuncRef,
+    call_method_to_slot: FuncRef,
+    _call_method_i64: FuncRef,
+    store_string: FuncRef,
+    call_func_to_slot: FuncRef,
+    call_func_2_to_slot: FuncRef,
+    call_func_3_to_slot: FuncRef,
+    create_instance: FuncRef,
 }
 
 unsafe impl Send for CraneliftJIT {}
@@ -83,17 +105,15 @@ impl CraneliftJIT {
         num_params: usize,
         _num_locals: usize,
         module: &BytecodeModule,
+        _param_indices: &[usize],
     ) -> Option<*const u8> {
         if self.compiled.contains_key(&body) {
             return self.compiled.get(&body).map(|c| c.ptr);
         }
-        if num_params != 1 {
-            return None;
+        if num_params == 1 && self.is_integer_recursive(func_name, body, module) {
+            return self.compile_fibonacci(func_name, body, module);
         }
-        if !self.is_integer_recursive(func_name, body, module) {
-            return None;
-        }
-        self.compile_fibonacci(func_name, body, module)
+        None
     }
 
     pub fn compile_loop_function(
@@ -118,7 +138,9 @@ impl CraneliftJIT {
         let mut ctx = self.module.make_context();
         ctx.func.signature = sig;
 
-        {
+        let result_slot = _num_locals as u32;
+
+        let emit_ok = {
             let mut bcx = FunctionBuilder::new(&mut ctx.func, &mut self.func_ctx);
             let entry = bcx.create_block();
             bcx.append_block_params_for_function_params(entry);
@@ -126,12 +148,20 @@ impl CraneliftJIT {
             bcx.seal_block(entry);
             let locals_ptr = bcx.block_params(entry)[0];
             let helpers = declare_helpers(&mut self.module, &mut bcx);
-            let ok = emit_loop_bytecode(&mut bcx, body, module, locals_ptr, &helpers, param_indices, func_name, _num_locals);
+            let ok = emit_loop_bytecode(&mut bcx, body, module, locals_ptr, &helpers, param_indices, func_name, _num_locals, result_slot);
             if !ok {
+                if let Some(cur) = bcx.current_block() {
+                    bcx.seal_block(cur);
+                }
                 let zero = bcx.ins().iconst(types::I64, 0);
                 bcx.ins().return_(&[zero]);
             }
             bcx.finalize();
+            ok
+        };
+
+        if !emit_ok {
+            return None;
         }
 
         self.module.define_function(func_id, &mut ctx).ok()?;
@@ -292,17 +322,39 @@ fn declare_helpers(module: &mut JITModule, bcx: &mut FunctionBuilder) -> JitHelp
         list_append: decl(module, bcx, "arabi_jit_list_append", &[types::I64, types::I32, types::I32], &[]),
         subscript_int: decl(module, bcx, "arabi_jit_subscript_int", &[types::I64, types::I32, types::I32], &[types::I64]),
         subscript_int_imm: decl(module, bcx, "arabi_jit_subscript_int_imm", &[types::I64, types::I32, types::I32, types::I64], &[types::I64]),
+        subscript_int_compare: decl(module, bcx, "arabi_jit_subscript_int_compare", &[types::I64, types::I32, types::I32, types::I32], &[types::I64]),
         store_subscript: decl(module, bcx, "arabi_jit_store_subscript", &[types::I64, types::I32, types::I32, types::I32], &[]),
         _store_subscript_add_imm: decl(module, bcx, "arabi_jit_store_subscript_add_imm", &[types::I64, types::I32, types::I32, types::I64, types::I32], &[]),
         swap_adjacent: decl(module, bcx, "arabi_jit_swap_adjacent", &[types::I64, types::I32, types::I32], &[]),
         _subscript_gt: decl(module, bcx, "arabi_jit_subscript_gt", &[types::I64, types::I32, types::I32, types::I64], &[types::I64]),
-        get_time: decl(module, bcx, "arabi_jit_get_time", &[], &[types::F64]),
-        print_int: decl(module, bcx, "arabi_jit_print_int", &[types::I64], &[]),
-        print_float: decl(module, bcx, "arabi_jit_print_float", &[types::F64], &[]),
-        print_sep: decl(module, bcx, "arabi_jit_print_sep", &[], &[]),
+        _get_time: decl(module, bcx, "arabi_jit_get_time", &[], &[types::F64]),
+        _print_int: decl(module, bcx, "arabi_jit_print_int", &[types::I64], &[]),
+        _print_float: decl(module, bcx, "arabi_jit_print_float", &[types::F64], &[]),
+        _print_sep: decl(module, bcx, "arabi_jit_print_sep", &[], &[]),
         _print_newline: decl(module, bcx, "arabi_jit_print_newline", &[], &[]),
         load_global_to_local: decl(module, bcx, "arabi_jit_load_global_to_local", &[types::I32, types::I64, types::I32], &[]),
         call_func: decl(module, bcx, "arabi_jit_call_func", &[types::I64, types::I32, types::I32, types::I32], &[types::I64]),
+        binary_add_generic: decl(module, bcx, "arabi_jit_binary_add_generic", &[types::I64, types::I32, types::I32, types::I32], &[]),
+        binary_sub_generic: decl(module, bcx, "arabi_jit_binary_sub_generic", &[types::I64, types::I32, types::I32, types::I32], &[]),
+        binary_mul_generic: decl(module, bcx, "arabi_jit_binary_mul_generic", &[types::I64, types::I32, types::I32, types::I32], &[]),
+        binary_div_generic: decl(module, bcx, "arabi_jit_binary_div_generic", &[types::I64, types::I32, types::I32, types::I32], &[]),
+        _binary_mod_generic: decl(module, bcx, "arabi_jit_binary_mod_generic", &[types::I64, types::I32, types::I32, types::I32], &[]),
+        _compare_generic: decl(module, bcx, "arabi_jit_compare_generic", &[types::I64, types::I32, types::I32, types::I32], &[types::I64]),
+        get_instance_field: decl(module, bcx, "arabi_jit_get_instance_field", &[types::I64, types::I32, types::I32, types::I32], &[]),
+        set_instance_field: decl(module, bcx, "arabi_jit_set_instance_field", &[types::I64, types::I32, types::I32, types::I32], &[]),
+        get_field_by_name_slot: decl(module, bcx, "arabi_jit_get_field_by_name_slot", &[types::I64, types::I32, types::I32, types::I32], &[]),
+        store_attr: decl(module, bcx, "arabi_jit_store_attr", &[types::I64, types::I32, types::I32, types::I32], &[]),
+        subscript_generic: decl(module, bcx, "arabi_jit_subscript_generic", &[types::I64, types::I32, types::I32, types::I32], &[]),
+        store_subscript_generic: decl(module, bcx, "arabi_jit_store_subscript_generic", &[types::I64, types::I32, types::I32, types::I32], &[]),
+        _call_method: decl(module, bcx, "arabi_jit_call_method", &[types::I64, types::I32, types::I32, types::I32, types::I32, types::I32], &[types::I64]),
+        call_method_to_slot: decl(module, bcx, "arabi_jit_call_method_to_slot", &[types::I64, types::I32, types::I32, types::I32, types::I32, types::I32], &[types::I64]),
+        _call_method_i64: decl(module, bcx, "arabi_jit_call_method_i64", &[types::I64, types::I32, types::I32, types::I32, types::I32, types::I32], &[types::I64]),
+        store_string: decl(module, bcx, "arabi_jit_store_string", &[types::I64, types::I32, types::I64, types::I32], &[]),
+        store_value: decl(module, bcx, "arabi_jit_store_value", &[types::I64, types::I32, types::I32], &[]),
+        call_func_to_slot: decl(module, bcx, "arabi_jit_call_func_to_slot", &[types::I64, types::I32, types::I32, types::I32, types::I32], &[types::I64]),
+        call_func_2_to_slot: decl(module, bcx, "arabi_jit_call_func_2_to_slot", &[types::I64, types::I32, types::I32, types::I32, types::I32], &[types::I64]),
+        call_func_3_to_slot: decl(module, bcx, "arabi_jit_call_func_3_to_slot", &[types::I64, types::I32, types::I32, types::I32, types::I32, types::I32], &[types::I64]),
+        create_instance: decl(module, bcx, "arabi_jit_create_instance", &[types::I32, types::I64, types::I32], &[]),
     }
 }
 
@@ -315,21 +367,38 @@ fn emit_loop_bytecode(
     param_indices: &[usize],
     _func_name: &str,
     num_locals: usize,
+    result_slot: u32,
 ) -> bool {
     let mut ip = body;
     let max_ip = module.packed.len().min(body + 2000);
     let mut block_map: HashMap<usize, Block> = HashMap::new();
-    block_map.insert(body, bcx.current_block().unwrap_or_else(|| {
+    let entry_block = bcx.current_block().unwrap_or_else(|| {
         let blk = bcx.create_block();
         bcx.switch_to_block(blk);
         blk
-    }));
+    });
+    block_map.insert(body, entry_block);
+
+    let return_block = bcx.create_block();
 
     let mut stack: Vec<cranelift::prelude::Value> = Vec::new();
     let mut slot_map: Vec<Option<u32>> = Vec::new();
-    let mut next_temp_slot: u32 = num_locals as u32;
+    let mut next_temp_slot: u32 = (num_locals as u32) + 1;
+    let mut last_was_branch = false;
 
     while ip < max_ip {
+        if let Some(&target_block) = block_map.get(&ip) {
+            if bcx.current_block() != Some(target_block) {
+                if !last_was_branch {
+                    bcx.ins().jump(target_block, &[]);
+                }
+                bcx.switch_to_block(target_block);
+                last_was_branch = false;
+            }
+        } else {
+            last_was_branch = false;
+        }
+
         let packed = module.packed[ip];
         let opcode = (packed & 0xFF) as u8;
         let a = ((packed >> 8) & 0xFF) as u8;
@@ -341,15 +410,31 @@ fn emit_loop_bytecode(
                 let val = if !stack.is_empty() { stack.pop().expect("JIT: stack non-empty but pop failed") } else {
                     bcx.ins().iconst(ty::I64, 0)
                 };
-                bcx.ins().return_(&[val]);
-                return true;
+                let slot_map_val = slot_map.pop().unwrap_or(None);
+                let rs = bcx.ins().iconst(ty::I32, result_slot as i64);
+                if let Some(_slot) = slot_map_val {
+                    if _slot != result_slot {
+                        let src = bcx.ins().iconst(ty::I32, _slot as i64);
+                        bcx.ins().call(h.store_value, &[locals_ptr, src, rs]);
+                    }
+                } else {
+                    if val_type(bcx, val) == ValType::F64 {
+                        bcx.ins().call(h.store_float, &[locals_ptr, rs, val]);
+                    } else {
+                        bcx.ins().call(h.store_int, &[locals_ptr, rs, val]);
+                    }
+                }
+                bcx.ins().jump(return_block, &[]);
+                let dead = bcx.create_block();
+                bcx.switch_to_block(dead);
+                last_was_branch = true;
             }
             OP_LOAD_CONST => {
                 match module.constants.get(b as usize) {
                     Some(CompilerValue::Integer(n)) => { stack.push(bcx.ins().iconst(ty::I64, *n)); slot_map.push(None); }
                     Some(CompilerValue::Float(f)) => { stack.push(bcx.ins().f64const(*f)); slot_map.push(None); }
                     Some(CompilerValue::Boolean(true)) => { stack.push(bcx.ins().iconst(ty::I64, 1)); slot_map.push(None); }
-                    _ => { stack.push(bcx.ins().iconst(ty::I64, 0)); slot_map.push(None); }
+                    _ => { return false; }
                 }
             }
             OP_LOAD_FAST => {
@@ -370,32 +455,152 @@ fn emit_loop_bytecode(
                 }
             }
             OP_POP_TOP => { stack.pop(); slot_map.pop(); }
-            OP_BINARY_ADD | OP_BINARY_ADD_INT_INT => {
+            OP_BINARY_ADD_INT_INT => {
                 if let (Some(right), Some(left)) = (stack.pop(), stack.pop()) {
                     slot_map.pop(); slot_map.pop();
                     stack.push(bcx.ins().iadd(left, right));
                     slot_map.push(None);
                 }
             }
-            OP_BINARY_SUBTRACT | OP_BINARY_SUB_INT_INT => {
+            OP_BINARY_ADD => {
+                let right = stack.pop().unwrap_or_else(|| bcx.ins().iconst(ty::I64, 0));
+                let right_slot = slot_map.pop().unwrap_or(None).unwrap_or(next_temp_slot);
+                let left = stack.pop().unwrap_or_else(|| bcx.ins().iconst(ty::I64, 0));
+                let left_slot = slot_map.pop().unwrap_or(None).unwrap_or({ let s = next_temp_slot; next_temp_slot += 1; s });
+                if val_type(bcx, left) == ValType::F64 && val_type(bcx, right) == ValType::F64 {
+                    let result = bcx.ins().fadd(left, right);
+                    let result_slot = next_temp_slot; next_temp_slot += 1;
+                    let rs = bcx.ins().iconst(ty::I32, result_slot as i64);
+                    bcx.ins().call(h.store_float, &[locals_ptr, rs, result]);
+                    stack.push(result);
+                    slot_map.push(Some(result_slot));
+                } else {
+                    { let ti = bcx.ins().iconst(ty::I32, right_slot as i64);
+                    if val_type(bcx, right) == ValType::F64 { bcx.ins().call(h.store_float, &[locals_ptr, ti, right]); }
+                    else { bcx.ins().call(h.store_int, &[locals_ptr, ti, right]); } }
+                    { let ti = bcx.ins().iconst(ty::I32, left_slot as i64);
+                    if val_type(bcx, left) == ValType::F64 { bcx.ins().call(h.store_float, &[locals_ptr, ti, left]); }
+                    else { bcx.ins().call(h.store_int, &[locals_ptr, ti, left]); } }
+                    let result_slot = next_temp_slot; next_temp_slot += 1;
+                    let a_i = bcx.ins().iconst(ty::I32, left_slot as i64);
+                    let b_i = bcx.ins().iconst(ty::I32, right_slot as i64);
+                    let r_i = bcx.ins().iconst(ty::I32, result_slot as i64);
+                    bcx.ins().call(h.binary_add_generic, &[locals_ptr, a_i, b_i, r_i]);
+                    let r_i2 = bcx.ins().iconst(ty::I32, result_slot as i64);
+                    let call = bcx.ins().call(h.load_int, &[locals_ptr, r_i2]);
+                    stack.push(bcx.inst_results(call)[0]);
+                    slot_map.push(Some(result_slot));
+                }
+            }
+            OP_BINARY_SUB_INT_INT => {
                 if let (Some(right), Some(left)) = (stack.pop(), stack.pop()) {
                     slot_map.pop(); slot_map.pop();
                     stack.push(bcx.ins().isub(left, right));
                     slot_map.push(None);
                 }
             }
-            OP_BINARY_MULTIPLY | OP_BINARY_MUL_INT_INT => {
+            OP_BINARY_SUBTRACT => {
+                let right = stack.pop().unwrap_or_else(|| bcx.ins().iconst(ty::I64, 0));
+                let right_slot = slot_map.pop().unwrap_or(None).unwrap_or(next_temp_slot);
+                let left = stack.pop().unwrap_or_else(|| bcx.ins().iconst(ty::I64, 0));
+                let left_slot = slot_map.pop().unwrap_or(None).unwrap_or({ let s = next_temp_slot; next_temp_slot += 1; s });
+                if val_type(bcx, left) == ValType::F64 && val_type(bcx, right) == ValType::F64 {
+                    let result = bcx.ins().fsub(left, right);
+                    let result_slot = next_temp_slot; next_temp_slot += 1;
+                    let rs = bcx.ins().iconst(ty::I32, result_slot as i64);
+                    bcx.ins().call(h.store_float, &[locals_ptr, rs, result]);
+                    stack.push(result);
+                    slot_map.push(Some(result_slot));
+                } else {
+                    { let ti = bcx.ins().iconst(ty::I32, right_slot as i64);
+                    if val_type(bcx, right) == ValType::F64 { bcx.ins().call(h.store_float, &[locals_ptr, ti, right]); }
+                    else { bcx.ins().call(h.store_int, &[locals_ptr, ti, right]); } }
+                    { let ti = bcx.ins().iconst(ty::I32, left_slot as i64);
+                    if val_type(bcx, left) == ValType::F64 { bcx.ins().call(h.store_float, &[locals_ptr, ti, left]); }
+                    else { bcx.ins().call(h.store_int, &[locals_ptr, ti, left]); } }
+                    let result_slot = next_temp_slot; next_temp_slot += 1;
+                    let a_i = bcx.ins().iconst(ty::I32, left_slot as i64);
+                    let b_i = bcx.ins().iconst(ty::I32, right_slot as i64);
+                    let r_i = bcx.ins().iconst(ty::I32, result_slot as i64);
+                    bcx.ins().call(h.binary_sub_generic, &[locals_ptr, a_i, b_i, r_i]);
+                    let r_i2 = bcx.ins().iconst(ty::I32, result_slot as i64);
+                    let call = bcx.ins().call(h.load_int, &[locals_ptr, r_i2]);
+                    stack.push(bcx.inst_results(call)[0]);
+                    slot_map.push(Some(result_slot));
+                }
+            }
+            OP_BINARY_MUL_INT_INT => {
                 if let (Some(right), Some(left)) = (stack.pop(), stack.pop()) {
                     slot_map.pop(); slot_map.pop();
                     stack.push(bcx.ins().imul(left, right));
                     slot_map.push(None);
                 }
             }
-            OP_BINARY_DIVIDE | OP_BINARY_DIV_INT_INT => {
+            OP_BINARY_MULTIPLY => {
+                let right = stack.pop().unwrap_or_else(|| bcx.ins().iconst(ty::I64, 0));
+                let right_slot = slot_map.pop().unwrap_or(None).unwrap_or(next_temp_slot);
+                let left = stack.pop().unwrap_or_else(|| bcx.ins().iconst(ty::I64, 0));
+                let left_slot = slot_map.pop().unwrap_or(None).unwrap_or({ let s = next_temp_slot; next_temp_slot += 1; s });
+                if val_type(bcx, left) == ValType::F64 && val_type(bcx, right) == ValType::F64 {
+                    let result = bcx.ins().fmul(left, right);
+                    let result_slot = next_temp_slot; next_temp_slot += 1;
+                    let rs = bcx.ins().iconst(ty::I32, result_slot as i64);
+                    bcx.ins().call(h.store_float, &[locals_ptr, rs, result]);
+                    stack.push(result);
+                    slot_map.push(Some(result_slot));
+                } else {
+                    { let ti = bcx.ins().iconst(ty::I32, right_slot as i64);
+                    if val_type(bcx, right) == ValType::F64 { bcx.ins().call(h.store_float, &[locals_ptr, ti, right]); }
+                    else { bcx.ins().call(h.store_int, &[locals_ptr, ti, right]); } }
+                    { let ti = bcx.ins().iconst(ty::I32, left_slot as i64);
+                    if val_type(bcx, left) == ValType::F64 { bcx.ins().call(h.store_float, &[locals_ptr, ti, left]); }
+                    else { bcx.ins().call(h.store_int, &[locals_ptr, ti, left]); } }
+                    let result_slot = next_temp_slot; next_temp_slot += 1;
+                    let a_i = bcx.ins().iconst(ty::I32, left_slot as i64);
+                    let b_i = bcx.ins().iconst(ty::I32, right_slot as i64);
+                    let r_i = bcx.ins().iconst(ty::I32, result_slot as i64);
+                    bcx.ins().call(h.binary_mul_generic, &[locals_ptr, a_i, b_i, r_i]);
+                    let r_i2 = bcx.ins().iconst(ty::I32, result_slot as i64);
+                    let call = bcx.ins().call(h.load_int, &[locals_ptr, r_i2]);
+                    stack.push(bcx.inst_results(call)[0]);
+                    slot_map.push(Some(result_slot));
+                }
+            }
+            OP_BINARY_DIV_INT_INT => {
                 if let (Some(right), Some(left)) = (stack.pop(), stack.pop()) {
                     slot_map.pop(); slot_map.pop();
                     stack.push(bcx.ins().sdiv(left, right));
                     slot_map.push(None);
+                }
+            }
+            OP_BINARY_DIVIDE => {
+                let right = stack.pop().unwrap_or_else(|| bcx.ins().iconst(ty::I64, 0));
+                let right_slot = slot_map.pop().unwrap_or(None).unwrap_or(next_temp_slot);
+                let left = stack.pop().unwrap_or_else(|| bcx.ins().iconst(ty::I64, 0));
+                let left_slot = slot_map.pop().unwrap_or(None).unwrap_or({ let s = next_temp_slot; next_temp_slot += 1; s });
+                if val_type(bcx, left) == ValType::F64 && val_type(bcx, right) == ValType::F64 {
+                    let result = bcx.ins().fdiv(left, right);
+                    let result_slot = next_temp_slot; next_temp_slot += 1;
+                    let rs = bcx.ins().iconst(ty::I32, result_slot as i64);
+                    bcx.ins().call(h.store_float, &[locals_ptr, rs, result]);
+                    stack.push(result);
+                    slot_map.push(Some(result_slot));
+                } else {
+                    { let ti = bcx.ins().iconst(ty::I32, right_slot as i64);
+                    if val_type(bcx, right) == ValType::F64 { bcx.ins().call(h.store_float, &[locals_ptr, ti, right]); }
+                    else { bcx.ins().call(h.store_int, &[locals_ptr, ti, right]); } }
+                    { let ti = bcx.ins().iconst(ty::I32, left_slot as i64);
+                    if val_type(bcx, left) == ValType::F64 { bcx.ins().call(h.store_float, &[locals_ptr, ti, left]); }
+                    else { bcx.ins().call(h.store_int, &[locals_ptr, ti, left]); } }
+                    let result_slot = next_temp_slot; next_temp_slot += 1;
+                    let a_i = bcx.ins().iconst(ty::I32, left_slot as i64);
+                    let b_i = bcx.ins().iconst(ty::I32, right_slot as i64);
+                    let r_i = bcx.ins().iconst(ty::I32, result_slot as i64);
+                    bcx.ins().call(h.binary_div_generic, &[locals_ptr, a_i, b_i, r_i]);
+                    let r_i2 = bcx.ins().iconst(ty::I32, result_slot as i64);
+                    let call = bcx.ins().call(h.load_int, &[locals_ptr, r_i2]);
+                    stack.push(bcx.inst_results(call)[0]);
+                    slot_map.push(Some(result_slot));
                 }
             }
             OP_BINARY_MODULO | OP_BINARY_MOD_INT_INT => {
@@ -499,11 +704,10 @@ fn emit_loop_bytecode(
                     slot_map.pop();
                     let target = ip + 1 + c as usize;
                     let target_block = *block_map.entry(target).or_insert_with(|| bcx.create_block());
-                    let fallthrough = *block_map.entry(ip + 1).or_insert_with(|| bcx.create_block());
-                    bcx.ins().brif(cond, fallthrough, &[], target_block, &[]);
-                    let new_block = bcx.create_block();
-                    bcx.switch_to_block(new_block);
-                    bcx.seal_block(fallthrough);
+                    let cont_block = bcx.create_block();
+                    bcx.ins().brif(cond, cont_block, &[], target_block, &[]);
+                    bcx.switch_to_block(cont_block);
+                    block_map.entry(ip + 1).or_insert(cont_block);
                 }
             }
             OP_POP_JUMP_IF_TRUE => {
@@ -511,11 +715,10 @@ fn emit_loop_bytecode(
                     slot_map.pop();
                     let target = ip + 1 + c as usize;
                     let target_block = *block_map.entry(target).or_insert_with(|| bcx.create_block());
-                    let fallthrough = *block_map.entry(ip + 1).or_insert_with(|| bcx.create_block());
-                    bcx.ins().brif(cond, target_block, &[], fallthrough, &[]);
-                    let new_block = bcx.create_block();
-                    bcx.switch_to_block(new_block);
-                    bcx.seal_block(fallthrough);
+                    let cont_block = bcx.create_block();
+                    bcx.ins().brif(cond, target_block, &[], cont_block, &[]);
+                    bcx.switch_to_block(cont_block);
+                    block_map.entry(ip + 1).or_insert(cont_block);
                 }
             }
             OP_JUMP_FORWARD => {
@@ -524,6 +727,7 @@ fn emit_loop_bytecode(
                 bcx.ins().jump(target_block, &[]);
                 let new_block = bcx.create_block();
                 bcx.switch_to_block(new_block);
+                last_was_branch = true;
             }
             OP_JUMP_BACKWARD => {
                 let target = c as usize;
@@ -531,6 +735,7 @@ fn emit_loop_bytecode(
                 bcx.ins().jump(target_block, &[]);
                 let new_block = bcx.create_block();
                 bcx.switch_to_block(new_block);
+                last_was_branch = true;
             }
             OP_FOR_RANGE => {
                 let iter_local = a as u32;
@@ -581,10 +786,10 @@ fn emit_loop_bytecode(
                 let should_skip = bcx.ins().bnot(gt);
                 let target = c as usize;
                 let target_block = *block_map.entry(target).or_insert_with(|| bcx.create_block());
-                let fallthrough = *block_map.entry(ip + 1).or_insert_with(|| bcx.create_block());
-                bcx.ins().brif(should_skip, target_block, &[], fallthrough, &[]);
-                let new_block = bcx.create_block();
-                bcx.switch_to_block(new_block);
+                let cont_block = bcx.create_block();
+                bcx.ins().brif(should_skip, target_block, &[], cont_block, &[]);
+                bcx.switch_to_block(cont_block);
+                block_map.entry(ip + 1).or_insert(cont_block);
             }
             OP_SWAP_ADJACENT => {
                 let list_i = bcx.ins().iconst(ty::I32, a as i64);
@@ -614,20 +819,130 @@ fn emit_loop_bytecode(
                     bcx.ins().call(h.store_subscript, &[locals_ptr, list_i, key_i, val_i]);
                 }
             }
+            OP_SUBSCRIPT => {
+                let key = stack.pop().unwrap_or_else(|| bcx.ins().iconst(ty::I64, 0));
+                let key_slot_opt = slot_map.pop().unwrap_or(None);
+                let key_slot = key_slot_opt.unwrap_or_else(|| { let s = next_temp_slot; next_temp_slot += 1; s });
+                if let Some(ks) = key_slot_opt {
+                    let ks_i32 = bcx.ins().iconst(ty::I32, ks as i64);
+                    let dst_i32 = bcx.ins().iconst(ty::I32, key_slot as i64);
+                    bcx.ins().call(h.store_value, &[locals_ptr, ks_i32, dst_i32]);
+                } else {
+                    let ti = bcx.ins().iconst(ty::I32, key_slot as i64);
+                    if val_type(bcx, key) == ValType::F64 { bcx.ins().call(h.store_float, &[locals_ptr, ti, key]); }
+                    else { bcx.ins().call(h.store_int, &[locals_ptr, ti, key]); }
+                }
+                let list = stack.pop().unwrap_or_else(|| bcx.ins().iconst(ty::I64, 0));
+                let list_slot_opt = slot_map.pop().unwrap_or(None);
+                let list_slot = list_slot_opt.unwrap_or_else(|| { let s = next_temp_slot; next_temp_slot += 1; s });
+                if let Some(ls) = list_slot_opt {
+                    let ls_i32 = bcx.ins().iconst(ty::I32, ls as i64);
+                    let dst_i32 = bcx.ins().iconst(ty::I32, list_slot as i64);
+                    bcx.ins().call(h.store_value, &[locals_ptr, ls_i32, dst_i32]);
+                } else {
+                    let ti = bcx.ins().iconst(ty::I32, list_slot as i64);
+                    bcx.ins().call(h.store_int, &[locals_ptr, ti, list]);
+                }
+                let result_slot = next_temp_slot; next_temp_slot += 1;
+                let ls = bcx.ins().iconst(ty::I32, list_slot as i64);
+                let ks = bcx.ins().iconst(ty::I32, key_slot as i64);
+                let rs = bcx.ins().iconst(ty::I32, result_slot as i64);
+                bcx.ins().call(h.subscript_generic, &[locals_ptr, ls, ks, rs]);
+                let rs2 = bcx.ins().iconst(ty::I32, result_slot as i64);
+                let call = bcx.ins().call(h.load_int, &[locals_ptr, rs2]);
+                stack.push(bcx.inst_results(call)[0]);
+                slot_map.push(Some(result_slot));
+            }
+            OP_STORE_SUBSCRIPT => {
+                let val = stack.pop().unwrap_or_else(|| bcx.ins().iconst(ty::I64, 0));
+                let val_slot_opt = slot_map.pop().unwrap_or(None);
+                let val_slot = val_slot_opt.unwrap_or_else(|| { let s = next_temp_slot; next_temp_slot += 1; s });
+                if let Some(vs) = val_slot_opt {
+                    let vs_i32 = bcx.ins().iconst(ty::I32, vs as i64);
+                    let dst_i32 = bcx.ins().iconst(ty::I32, val_slot as i64);
+                    bcx.ins().call(h.store_value, &[locals_ptr, vs_i32, dst_i32]);
+                } else {
+                    let ti = bcx.ins().iconst(ty::I32, val_slot as i64);
+                    if val_type(bcx, val) == ValType::F64 { bcx.ins().call(h.store_float, &[locals_ptr, ti, val]); }
+                    else { bcx.ins().call(h.store_int, &[locals_ptr, ti, val]); }
+                }
+                let key = stack.pop().unwrap_or_else(|| bcx.ins().iconst(ty::I64, 0));
+                let key_slot_opt = slot_map.pop().unwrap_or(None);
+                let key_slot = key_slot_opt.unwrap_or_else(|| { let s = next_temp_slot; next_temp_slot += 1; s });
+                if let Some(ks) = key_slot_opt {
+                    let ks_i32 = bcx.ins().iconst(ty::I32, ks as i64);
+                    let dst_i32 = bcx.ins().iconst(ty::I32, key_slot as i64);
+                    bcx.ins().call(h.store_value, &[locals_ptr, ks_i32, dst_i32]);
+                } else {
+                    let ti = bcx.ins().iconst(ty::I32, key_slot as i64);
+                    if val_type(bcx, key) == ValType::F64 { bcx.ins().call(h.store_float, &[locals_ptr, ti, key]); }
+                    else { bcx.ins().call(h.store_int, &[locals_ptr, ti, key]); }
+                }
+                let list = stack.pop().unwrap_or_else(|| bcx.ins().iconst(ty::I64, 0));
+                let list_slot_opt = slot_map.pop().unwrap_or(None);
+                let list_slot = list_slot_opt.unwrap_or_else(|| { let s = next_temp_slot; next_temp_slot += 1; s });
+                if let Some(ls) = list_slot_opt {
+                    let ls_i32 = bcx.ins().iconst(ty::I32, ls as i64);
+                    let dst_i32 = bcx.ins().iconst(ty::I32, list_slot as i64);
+                    bcx.ins().call(h.store_value, &[locals_ptr, ls_i32, dst_i32]);
+                } else {
+                    let ti = bcx.ins().iconst(ty::I32, list_slot as i64);
+                    bcx.ins().call(h.store_int, &[locals_ptr, ti, list]);
+                }
+                let ls = bcx.ins().iconst(ty::I32, list_slot as i64);
+                let ks = bcx.ins().iconst(ty::I32, key_slot as i64);
+                let vs = bcx.ins().iconst(ty::I32, val_slot as i64);
+                bcx.ins().call(h.store_subscript_generic, &[locals_ptr, ls, ks, vs]);
+            }
+            OP_GET_INSTANCE_FIELD => {
+                let name_idx = c as usize;
+                let obj = stack.pop().unwrap_or_else(|| bcx.ins().iconst(ty::I64, 0));
+                let obj_slot_opt = slot_map.pop().unwrap_or(None);
+                let obj_slot = obj_slot_opt.unwrap_or_else(|| {
+                    let s = next_temp_slot; next_temp_slot += 1;
+                    let ti = bcx.ins().iconst(ty::I32, s as i64);
+                    bcx.ins().call(h.store_int, &[locals_ptr, ti, obj]);
+                    s
+                });
+                let obj_i32 = bcx.ins().iconst(ty::I32, obj_slot as i64);
+                let result_slot = next_temp_slot; next_temp_slot += 1;
+                let rs = bcx.ins().iconst(ty::I32, result_slot as i64);
+                match module.constants.get(name_idx) {
+                    Some(CompilerValue::Integer(offset)) => {
+                        let offset_i32 = bcx.ins().iconst(ty::I32, *offset as i64);
+                        bcx.ins().call(h.get_instance_field, &[locals_ptr, obj_i32, offset_i32, rs]);
+                    }
+                    Some(CompilerValue::String(_name)) => {
+                        let name_slot = next_temp_slot; next_temp_slot += 1;
+                        let name_str = _name.as_str();
+                        let ptr = name_str.as_ptr();
+                        let len = name_str.len() as u32;
+                        let ptr_val = bcx.ins().iconst(ty::I64, ptr as i64);
+                        let len_val = bcx.ins().iconst(ty::I32, len as i64);
+                        let ns = bcx.ins().iconst(ty::I32, name_slot as i64);
+                        bcx.ins().call(h.store_string, &[locals_ptr, ns, ptr_val, len_val]);
+                        bcx.ins().call(h.get_field_by_name_slot, &[locals_ptr, obj_i32, ns, rs]);
+                    }
+                    _ => {
+                        let zero = bcx.ins().iconst(ty::I64, 0);
+                        bcx.ins().call(h.store_int, &[locals_ptr, rs, zero]);
+                    }
+                }
+                let rs2 = bcx.ins().iconst(ty::I32, result_slot as i64);
+                let call = bcx.ins().call(h.load_int, &[locals_ptr, rs2]);
+                stack.push(bcx.inst_results(call)[0]);
+                slot_map.push(Some(result_slot));
+            }
             OP_CALL_FUNCTION => {
                 let argc = a as usize;
                 if argc == 0 {
-                    // 0-arg call: check for known builtins
                     let func_slot_opt = slot_map.pop().unwrap_or(None);
                     stack.pop();
                     if let Some(func_slot) = func_slot_opt {
                         let func_slot_i32 = bcx.ins().iconst(ty::I32, func_slot as i64);
                         let zero_i32 = bcx.ins().iconst(ty::I32, 0);
                         let call = bcx.ins().call(h.call_func, &[
-                            locals_ptr,
-                            func_slot_i32,
-                            zero_i32,
-                            zero_i32,
+                            locals_ptr, func_slot_i32, zero_i32, zero_i32,
                         ]);
                         stack.push(bcx.inst_results(call)[0]);
                         slot_map.push(None);
@@ -636,32 +951,47 @@ fn emit_loop_bytecode(
                         slot_map.push(None);
                     }
                 } else {
-                    // Pop args and store in temp slots
-                    let mut arg_slot_indices: Vec<u32> = Vec::with_capacity(argc);
+                    let mut arg_sources: Vec<(Option<u32>, cranelift::prelude::Value)> = Vec::with_capacity(argc);
                     for _ in 0..argc {
                         let val = stack.pop().unwrap_or_else(|| bcx.ins().iconst(ty::I64, 0));
-                        slot_map.pop();
-                        let temp = next_temp_slot;
-                        next_temp_slot += 1;
-                        let temp_i32 = bcx.ins().iconst(ty::I32, temp as i64);
-                        bcx.ins().call(h.store_int, &[locals_ptr, temp_i32, val]);
-                        arg_slot_indices.push(temp);
+                        let slot = slot_map.pop().unwrap_or(None);
+                        arg_sources.push((slot, val));
                     }
-                    // Pop function
                     let func_slot = slot_map.pop().unwrap_or(None).unwrap_or(0);
                     stack.pop();
-                    // Call via runtime helper
-                    let first_arg = arg_slot_indices.first().copied().unwrap_or(0);
+                    let mut arg_slot_indices: Vec<u32> = Vec::with_capacity(argc);
+                    for (src, val) in arg_sources.iter().rev() {
+                        let temp = next_temp_slot;
+                        next_temp_slot += 1;
+                        if let Some(src_slot) = src {
+                            let src_i32 = bcx.ins().iconst(ty::I32, *src_slot as i64);
+                            let dst_i32 = bcx.ins().iconst(ty::I32, temp as i64);
+                            bcx.ins().call(h.store_value, &[locals_ptr, src_i32, dst_i32]);
+                        } else {
+                            let temp_i32 = bcx.ins().iconst(ty::I32, temp as i64);
+                            bcx.ins().call(h.store_int, &[locals_ptr, temp_i32, *val]);
+                        }
+                        arg_slot_indices.push(temp);
+                    }
                     let func_slot_i32 = bcx.ins().iconst(ty::I32, func_slot as i64);
-                    let first_arg_i32 = bcx.ins().iconst(ty::I32, first_arg as i64);
-                    let argc_i32 = bcx.ins().iconst(ty::I32, argc as i64);
-                    let call = bcx.ins().call(h.call_func, &[
-                        locals_ptr,
-                        func_slot_i32,
-                        first_arg_i32,
-                        argc_i32,
-                    ]);
-                    stack.push(bcx.inst_results(call)[0]);
+                    let rs = bcx.ins().iconst(ty::I32, result_slot as i64);
+                    if argc == 2 {
+                        let a0 = bcx.ins().iconst(ty::I32, arg_slot_indices[0] as i64);
+                        let a1 = bcx.ins().iconst(ty::I32, arg_slot_indices[1] as i64);
+                        bcx.ins().call(h.call_func_2_to_slot, &[locals_ptr, func_slot_i32, a0, a1, rs]);
+                    } else if argc == 3 {
+                        let a0 = bcx.ins().iconst(ty::I32, arg_slot_indices[0] as i64);
+                        let a1 = bcx.ins().iconst(ty::I32, arg_slot_indices[1] as i64);
+                        let a2 = bcx.ins().iconst(ty::I32, arg_slot_indices[2] as i64);
+                        bcx.ins().call(h.call_func_3_to_slot, &[locals_ptr, func_slot_i32, a0, a1, a2, rs]);
+                    } else {
+                        let first_arg = arg_slot_indices.first().copied().unwrap_or(0);
+                        let first_arg_i32 = bcx.ins().iconst(ty::I32, first_arg as i64);
+                        let argc_i32 = bcx.ins().iconst(ty::I32, argc as i64);
+                        bcx.ins().call(h.call_func_to_slot, &[locals_ptr, func_slot_i32, first_arg_i32, argc_i32, rs]);
+                    }
+                    let load_call = bcx.ins().call(h.load_int, &[locals_ptr, rs]);
+                    stack.push(bcx.inst_results(load_call)[0]);
                     slot_map.push(None);
                 }
             }
@@ -699,7 +1029,7 @@ fn emit_loop_bytecode(
                 bcx.ins().jump(entry_block, &[]);
                 let new_block = bcx.create_block();
                 bcx.switch_to_block(new_block);
-                return true;
+                last_was_branch = true;
             }
             OP_COMPARE_LE_INT_INT => {
                 if let (Some(right), Some(left)) = (stack.pop(), stack.pop()) {
@@ -725,11 +1055,10 @@ fn emit_loop_bytecode(
                 let cmp = bcx.ins().icmp(IntCC::SignedLessThanOrEqual, local_val, imm);
                 let target = ip + 1 + c as usize;
                 let target_block = *block_map.entry(target).or_insert_with(|| bcx.create_block());
-                let fallthrough = *block_map.entry(ip + 1).or_insert_with(|| bcx.create_block());
-                bcx.ins().brif(cmp, target_block, &[], fallthrough, &[]);
-                let new_block = bcx.create_block();
-                bcx.switch_to_block(new_block);
-                bcx.seal_block(fallthrough);
+                let cont_block = bcx.create_block();
+                bcx.ins().brif(cmp, target_block, &[], cont_block, &[]);
+                bcx.switch_to_block(cont_block);
+                block_map.entry(ip + 1).or_insert(cont_block);
             }
             OP_POP_JUMP_IF_LT_LOCAL_IMM => {
                 let local_idx = bcx.ins().iconst(ty::I32, a as i64);
@@ -739,11 +1068,10 @@ fn emit_loop_bytecode(
                 let cmp = bcx.ins().icmp(IntCC::SignedLessThan, local_val, imm);
                 let target = ip + 1 + c as usize;
                 let target_block = *block_map.entry(target).or_insert_with(|| bcx.create_block());
-                let fallthrough = *block_map.entry(ip + 1).or_insert_with(|| bcx.create_block());
-                bcx.ins().brif(cmp, target_block, &[], fallthrough, &[]);
-                let new_block = bcx.create_block();
-                bcx.switch_to_block(new_block);
-                bcx.seal_block(fallthrough);
+                let cont_block = bcx.create_block();
+                bcx.ins().brif(cmp, target_block, &[], cont_block, &[]);
+                bcx.switch_to_block(cont_block);
+                block_map.entry(ip + 1).or_insert(cont_block);
             }
             OP_SUBTRACT_LOCAL_IMM => {
                 let local_idx = bcx.ins().iconst(ty::I32, a as i64);
@@ -851,10 +1179,284 @@ fn emit_loop_bytecode(
                     slot_map.push(None);
                 }
             }
+            OP_SET_INSTANCE_FIELD => {
+                let name_idx = c as usize;
+                let val = stack.pop().unwrap_or_else(|| bcx.ins().iconst(ty::I64, 0));
+                let val_slot_opt = slot_map.pop().unwrap_or(None);
+                let val_slot = val_slot_opt.unwrap_or_else(|| {
+                    let s = next_temp_slot; next_temp_slot += 1;
+                    let ti = bcx.ins().iconst(ty::I32, s as i64);
+                    if val_type(bcx, val) == ValType::F64 { bcx.ins().call(h.store_float, &[locals_ptr, ti, val]); }
+                    else { bcx.ins().call(h.store_int, &[locals_ptr, ti, val]); }
+                    s
+                });
+                let obj = stack.pop().unwrap_or_else(|| bcx.ins().iconst(ty::I64, 0));
+                let obj_slot_opt = slot_map.pop().unwrap_or(None);
+                let obj_slot = obj_slot_opt.unwrap_or_else(|| {
+                    let s = next_temp_slot; next_temp_slot += 1;
+                    let ti = bcx.ins().iconst(ty::I32, s as i64);
+                    bcx.ins().call(h.store_int, &[locals_ptr, ti, obj]);
+                    s
+                });
+                let obj_i32 = bcx.ins().iconst(ty::I32, obj_slot as i64);
+                let val_i32 = bcx.ins().iconst(ty::I32, val_slot as i64);
+                match module.constants.get(name_idx) {
+                    Some(CompilerValue::Integer(offset)) => {
+                        let offset_i32 = bcx.ins().iconst(ty::I32, *offset as i64);
+                        bcx.ins().call(h.set_instance_field, &[locals_ptr, obj_i32, offset_i32, val_i32]);
+                    }
+                    Some(CompilerValue::String(_name)) => {
+                        let name_slot = next_temp_slot; next_temp_slot += 1;
+                        let name_str = _name.as_str();
+                        let ptr = name_str.as_ptr();
+                        let len = name_str.len() as u32;
+                        let ptr_val = bcx.ins().iconst(ty::I64, ptr as i64);
+                        let len_val = bcx.ins().iconst(ty::I32, len as i64);
+                        let ns = bcx.ins().iconst(ty::I32, name_slot as i64);
+                        bcx.ins().call(h.store_string, &[locals_ptr, ns, ptr_val, len_val]);
+                        bcx.ins().call(h.store_attr, &[locals_ptr, obj_i32, ns, val_i32]);
+                    }
+                    _ => {}
+                }
+            }
+            OP_CALL_METHOD => {
+                let method_name_idx = a as usize;
+                let argc = b as usize;
+                let mut arg_slot_indices: Vec<u32> = Vec::with_capacity(argc);
+                for _ in 0..argc {
+                    let val = stack.pop().unwrap_or_else(|| bcx.ins().iconst(ty::I64, 0));
+                    slot_map.pop();
+                    let temp = next_temp_slot;
+                    next_temp_slot += 1;
+                    let temp_i32 = bcx.ins().iconst(ty::I32, temp as i64);
+                    bcx.ins().call(h.store_int, &[locals_ptr, temp_i32, val]);
+                    arg_slot_indices.push(temp);
+                }
+                let obj = stack.pop().unwrap_or_else(|| bcx.ins().iconst(ty::I64, 0));
+                let obj_slot_opt = slot_map.pop().unwrap_or(None);
+                let obj_slot = obj_slot_opt.unwrap_or_else(|| {
+                    let s = next_temp_slot; next_temp_slot += 1;
+                    let ti = bcx.ins().iconst(ty::I32, s as i64);
+                    bcx.ins().call(h.store_int, &[locals_ptr, ti, obj]);
+                    s
+                });
+                let name_slot = next_temp_slot; next_temp_slot += 1;
+                if let Some(name_str_val) = module.names.get(method_name_idx) {
+                    let name_str = name_str_val.as_str();
+                    let ptr = name_str.as_ptr();
+                    let len = name_str.len() as u32;
+                    let ptr_val = bcx.ins().iconst(ty::I64, ptr as i64);
+                    let len_val = bcx.ins().iconst(ty::I32, len as i64);
+                    let ns = bcx.ins().iconst(ty::I32, name_slot as i64);
+                    bcx.ins().call(h.store_string, &[locals_ptr, ns, ptr_val, len_val]);
+                }
+                let obj_i32 = bcx.ins().iconst(ty::I32, obj_slot as i64);
+                let ns_i32 = bcx.ins().iconst(ty::I32, name_slot as i64);
+                let first_arg = arg_slot_indices.first().copied().unwrap_or(0);
+                let first_arg_i32 = bcx.ins().iconst(ty::I32, first_arg as i64);
+                let argc_i32 = bcx.ins().iconst(ty::I32, argc as i64);
+                let result_slot = next_temp_slot; next_temp_slot += 1;
+                let rs = bcx.ins().iconst(ty::I32, result_slot as i64);
+                bcx.ins().call(h.call_method_to_slot, &[locals_ptr, obj_i32, ns_i32, first_arg_i32, argc_i32, rs]);
+                let rs2 = bcx.ins().iconst(ty::I32, result_slot as i64);
+                let call = bcx.ins().call(h.load_int, &[locals_ptr, rs2]);
+                stack.push(bcx.inst_results(call)[0]);
+                slot_map.push(Some(result_slot));
+            }
+            OP_CALL_METHOD_1ARG => {
+                let method_name_idx = a as usize;
+                let val = stack.pop().unwrap_or_else(|| bcx.ins().iconst(ty::I64, 0));
+                slot_map.pop();
+                let arg_slot = next_temp_slot; next_temp_slot += 1;
+                let arg_i32 = bcx.ins().iconst(ty::I32, arg_slot as i64);
+                bcx.ins().call(h.store_int, &[locals_ptr, arg_i32, val]);
+                let obj = stack.pop().unwrap_or_else(|| bcx.ins().iconst(ty::I64, 0));
+                let obj_slot_opt = slot_map.pop().unwrap_or(None);
+                let obj_slot = obj_slot_opt.unwrap_or_else(|| {
+                    let s = next_temp_slot; next_temp_slot += 1;
+                    let ti = bcx.ins().iconst(ty::I32, s as i64);
+                    bcx.ins().call(h.store_int, &[locals_ptr, ti, obj]);
+                    s
+                });
+                let name_slot = next_temp_slot; next_temp_slot += 1;
+                if let Some(name_str_val) = module.names.get(method_name_idx) {
+                    let name_str = name_str_val.as_str();
+                    let ptr = name_str.as_ptr();
+                    let len = name_str.len() as u32;
+                    let ptr_val = bcx.ins().iconst(ty::I64, ptr as i64);
+                    let len_val = bcx.ins().iconst(ty::I32, len as u32 as i64);
+                    let ns = bcx.ins().iconst(ty::I32, name_slot as i64);
+                    bcx.ins().call(h.store_string, &[locals_ptr, ns, ptr_val, len_val]);
+                }
+                let obj_i32 = bcx.ins().iconst(ty::I32, obj_slot as i64);
+                let ns_i32 = bcx.ins().iconst(ty::I32, name_slot as i64);
+                let result_slot = next_temp_slot; next_temp_slot += 1;
+                let rs = bcx.ins().iconst(ty::I32, result_slot as i64);
+                let one_i32 = bcx.ins().iconst(ty::I32, 1);
+                bcx.ins().call(h.call_method_to_slot, &[locals_ptr, obj_i32, ns_i32, arg_i32, one_i32, rs]);
+                let rs2 = bcx.ins().iconst(ty::I32, result_slot as i64);
+                let call = bcx.ins().call(h.load_int, &[locals_ptr, rs2]);
+                stack.push(bcx.inst_results(call)[0]);
+                slot_map.push(Some(result_slot));
+            }
+            OP_CALL_METHOD_VOID => {
+                let method_name_idx = a as usize;
+                let argc = b as usize;
+                let mut arg_slot_indices: Vec<u32> = Vec::with_capacity(argc);
+                for _ in 0..argc {
+                    let val = stack.pop().unwrap_or_else(|| bcx.ins().iconst(ty::I64, 0));
+                    slot_map.pop();
+                    let temp = next_temp_slot; next_temp_slot += 1;
+                    let temp_i32 = bcx.ins().iconst(ty::I32, temp as i64);
+                    bcx.ins().call(h.store_int, &[locals_ptr, temp_i32, val]);
+                    arg_slot_indices.push(temp);
+                }
+                let obj = stack.pop().unwrap_or_else(|| bcx.ins().iconst(ty::I64, 0));
+                let obj_slot_opt = slot_map.pop().unwrap_or(None);
+                let obj_slot = obj_slot_opt.unwrap_or_else(|| {
+                    let s = next_temp_slot; next_temp_slot += 1;
+                    let ti = bcx.ins().iconst(ty::I32, s as i64);
+                    bcx.ins().call(h.store_int, &[locals_ptr, ti, obj]);
+                    s
+                });
+                let name_slot = next_temp_slot; next_temp_slot += 1;
+                if let Some(name_str_val) = module.names.get(method_name_idx) {
+                    let name_str = name_str_val.as_str();
+                    let ptr = name_str.as_ptr();
+                    let len = name_str.len() as u32;
+                    let ptr_val = bcx.ins().iconst(ty::I64, ptr as i64);
+                    let len_val = bcx.ins().iconst(ty::I32, len as i64);
+                    let ns = bcx.ins().iconst(ty::I32, name_slot as i64);
+                    bcx.ins().call(h.store_string, &[locals_ptr, ns, ptr_val, len_val]);
+                }
+                let obj_i32 = bcx.ins().iconst(ty::I32, obj_slot as i64);
+                let ns_i32 = bcx.ins().iconst(ty::I32, name_slot as i64);
+                let first_arg = arg_slot_indices.first().copied().unwrap_or(0);
+                let first_arg_i32 = bcx.ins().iconst(ty::I32, first_arg as i64);
+                let argc_i32 = bcx.ins().iconst(ty::I32, argc as i64);
+                let result_slot = next_temp_slot; next_temp_slot += 1;
+                let rs = bcx.ins().iconst(ty::I32, result_slot as i64);
+                bcx.ins().call(h.call_method_to_slot, &[locals_ptr, obj_i32, ns_i32, first_arg_i32, argc_i32, rs]);
+            }
+            OP_STORE_ATTR => {
+                let name_idx = b as usize;
+                let val = stack.pop().unwrap_or_else(|| bcx.ins().iconst(ty::I64, 0));
+                let val_slot_opt = slot_map.pop().unwrap_or(None);
+                let val_slot = val_slot_opt.unwrap_or_else(|| {
+                    let s = next_temp_slot; next_temp_slot += 1;
+                    let ti = bcx.ins().iconst(ty::I32, s as i64);
+                    if val_type(bcx, val) == ValType::F64 { bcx.ins().call(h.store_float, &[locals_ptr, ti, val]); }
+                    else { bcx.ins().call(h.store_int, &[locals_ptr, ti, val]); }
+                    s
+                });
+                let obj = stack.pop().unwrap_or_else(|| bcx.ins().iconst(ty::I64, 0));
+                let obj_slot_opt = slot_map.pop().unwrap_or(None);
+                let obj_slot = obj_slot_opt.unwrap_or_else(|| {
+                    let s = next_temp_slot; next_temp_slot += 1;
+                    let ti = bcx.ins().iconst(ty::I32, s as i64);
+                    bcx.ins().call(h.store_int, &[locals_ptr, ti, obj]);
+                    s
+                });
+                let obj_i32 = bcx.ins().iconst(ty::I32, obj_slot as i64);
+                let val_i32 = bcx.ins().iconst(ty::I32, val_slot as i64);
+                let name_slot = next_temp_slot; next_temp_slot += 1;
+                if let Some(name_str_val) = module.names.get(name_idx) {
+                    let name_str = name_str_val.as_str();
+                    let ptr = name_str.as_ptr();
+                    let len = name_str.len() as u32;
+                    let ptr_val = bcx.ins().iconst(ty::I64, ptr as i64);
+                    let len_val = bcx.ins().iconst(ty::I32, len as i64);
+                    let ns = bcx.ins().iconst(ty::I32, name_slot as i64);
+                    bcx.ins().call(h.store_string, &[locals_ptr, ns, ptr_val, len_val]);
+                    bcx.ins().call(h.store_attr, &[locals_ptr, obj_i32, ns, val_i32]);
+                }
+            }
+            OP_POP_JUMP_IF_SUBSCRIPT_EQ_LOCAL | OP_POP_JUMP_IF_SUBSCRIPT_NE_LOCAL => {
+                let list_local = a as u32;
+                let idx_local = (b & 0xFF) as u32;
+                let cmp_local = ((b >> 8) & 0xFF) as u32;
+                let target = c as usize;
+                let list_i = bcx.ins().iconst(ty::I32, list_local as i64);
+                let key_i = bcx.ins().iconst(ty::I32, idx_local as i64);
+                let cmp_i = bcx.ins().iconst(ty::I32, cmp_local as i64);
+                let call = bcx.ins().call(h.subscript_int_compare, &[locals_ptr, list_i, key_i, cmp_i]);
+                let eq_result = bcx.inst_results(call)[0];
+                let is_eq = bcx.ins().icmp_imm(IntCC::NotEqual, eq_result, 0);
+                let should_jump = if opcode == OP_POP_JUMP_IF_SUBSCRIPT_EQ_LOCAL {
+                    bcx.ins().bnot(is_eq)
+                } else {
+                    is_eq
+                };
+                let target_block = *block_map.entry(target).or_insert_with(|| bcx.create_block());
+                let cont_block = bcx.create_block();
+                bcx.ins().brif(should_jump, target_block, &[], cont_block, &[]);
+                bcx.switch_to_block(cont_block);
+                block_map.entry(ip + 1).or_insert(cont_block);
+            }
+            OP_CREATE_INSTANCE => {
+                let name_idx = a as u32;
+                let rs = bcx.ins().iconst(ty::I32, result_slot as i64);
+                let name_i = bcx.ins().iconst(ty::I32, name_idx as i64);
+                bcx.ins().call(h.create_instance, &[name_i, locals_ptr, rs]);
+                let call = bcx.ins().call(h.load_int, &[locals_ptr, rs]);
+                stack.push(bcx.inst_results(call)[0]);
+                slot_map.push(Some(result_slot));
+                next_temp_slot += 1;
+            }
+            OP_INCREMENT_INT => {
+                let local_idx = a as u32;
+                let incr = b as i64;
+                let li = bcx.ins().iconst(ty::I32, local_idx as i64);
+                let call = bcx.ins().call(h.load_int, &[locals_ptr, li]);
+                let cur_val = bcx.inst_results(call)[0];
+                let new_val = bcx.ins().iadd_imm(cur_val, incr);
+                bcx.ins().call(h.store_int, &[locals_ptr, li, new_val]);
+            }
+            OP_JUMP_WHILE_INCREMENTED_LT => {
+                let local_idx = a as u32;
+                let loop_start = b as usize;
+                let increment = ((c & 0xFFFF) as u16) as i16 as i64;
+                let limit_field = (c >> 16) as u16;
+                let is_local_limit = (limit_field & 0x8000) != 0;
+                let limit_idx = (limit_field & 0x7FFF) as u32;
+                let li = bcx.ins().iconst(ty::I32, local_idx as i64);
+                let call = bcx.ins().call(h.load_int, &[locals_ptr, li]);
+                let cur_val = bcx.inst_results(call)[0];
+                let limit_val = if is_local_limit {
+                    let lim_li = bcx.ins().iconst(ty::I32, limit_idx as i64);
+                    let lim_call = bcx.ins().call(h.load_int, &[locals_ptr, lim_li]);
+                    bcx.inst_results(lim_call)[0]
+                } else {
+                    match module.constants.get(limit_idx as usize) {
+                        Some(CompilerValue::Integer(n)) => bcx.ins().iconst(ty::I64, *n),
+                        Some(CompilerValue::Float(f)) => {
+                            let fval = bcx.ins().f64const(*f);
+                            bcx.ins().fcvt_to_sint_sat(types::I64, fval)
+                        }
+                        _ => bcx.ins().iconst(ty::I64, 0),
+                    }
+                };
+                let should_continue = bcx.ins().icmp(IntCC::SignedLessThan, cur_val, limit_val);
+                let body_block = *block_map.entry(loop_start).or_insert_with(|| bcx.create_block());
+                let cont_block = bcx.create_block();
+                let new_val = bcx.ins().iadd_imm(cur_val, increment);
+                bcx.ins().call(h.store_int, &[locals_ptr, li, new_val]);
+                bcx.ins().brif(should_continue, body_block, &[], cont_block, &[]);
+                bcx.switch_to_block(cont_block);
+                block_map.entry(ip + 1).or_insert(cont_block);
+            }
             _ => { return false; }
         }
         ip += 1;
     }
+    if !last_was_branch {
+        bcx.ins().jump(return_block, &[]);
+    }
+    bcx.switch_to_block(return_block);
+    let rs = bcx.ins().iconst(ty::I32, result_slot as i64);
+    let call = bcx.ins().call(h.load_int, &[locals_ptr, rs]);
+    let ret_val = bcx.inst_results(call)[0];
+    bcx.ins().return_(&[ret_val]);
     true
 }
 

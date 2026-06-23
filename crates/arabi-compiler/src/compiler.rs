@@ -56,6 +56,8 @@ pub struct Compiler {
     in_constructor: bool,
     // Current function name (for TCO: detect self-recursive tail calls)
     current_function_name: Option<String>,
+    // Local variable type inference: maps local name → class name
+    local_types: std::collections::HashMap<String, String>,
 }
 
 impl Default for Compiler {
@@ -88,6 +90,7 @@ impl Compiler {
             current_class: None,
             in_constructor: false,
             current_function_name: None,
+            local_types: std::collections::HashMap::new(),
         }
     }
 
@@ -1482,6 +1485,56 @@ impl Compiler {
             }
         }
 
+        // Pass 37: Fuse LoadConst(String) + GetAttribute → GetInstanceField(const_idx)
+        let mut pass37_count = 0usize;
+        {
+            let len = self.instructions.len();
+            let mut i = 0;
+            while i + 1 < len {
+                if let Opcode::LoadConst(name_idx) = self.instructions[i].opcode {
+                    if let Opcode::GetAttribute = self.instructions[i + 1].opcode {
+                        if let Value::String(_) = &self.constants[name_idx] {
+                            self.instructions[i].opcode = Opcode::Nop;
+                            self.instructions[i + 1].opcode = Opcode::GetInstanceField(name_idx);
+                            self.instructions[i + 1].operand = name_idx;
+                            pass37_count += 1;
+                            i += 2;
+                            continue;
+                        }
+                    }
+                }
+                i += 1;
+            }
+            if pass37_count > 0 {
+                eprintln!("[peephole] Pass 37: fused {} LoadConst+GetAttribute → GetInstanceField", pass37_count);
+            }
+        }
+
+        // Pass 38: TCO for method calls — CallMethod + ReturnValue → TailCallMethod
+        {
+            let mut pass38_count = 0usize;
+            let len = self.instructions.len();
+            let mut i = 0;
+            while i + 1 < len {
+                if let Opcode::CallMethod(idx, argc, hash) = &self.instructions[i].opcode {
+                    if matches!(self.instructions[i + 1].opcode, Opcode::ReturnValue) {
+                        let tco_idx = *idx;
+                        let tco_argc = *argc;
+                        let tco_hash = *hash;
+                        self.instructions[i].opcode = Opcode::TailCallMethod(tco_idx, tco_argc, tco_hash);
+                        self.instructions[i + 1].opcode = Opcode::Nop;
+                        pass38_count += 1;
+                        i += 2;
+                        continue;
+                    }
+                }
+                i += 1;
+            }
+            if pass38_count > 0 {
+                eprintln!("[peephole] Pass 38: TCO {} CallMethod+ReturnValue → TailCallMethod", pass38_count);
+            }
+        }
+
         // Pass 22: Compact — remove all Nop instructions and adjust jump targets
         let old_len = self.instructions.len();
         if old_len == 0 { return; }
@@ -1644,6 +1697,13 @@ impl Compiler {
             Stmt::Assign { target, value } => {
                 match target {
                     Expr::Identifier(name) => {
+                        if let Expr::Call { function, .. } = &value {
+                            if let Expr::Identifier(class_name) = &**function {
+                                if self.class_field_map.contains_key(class_name.as_str()) {
+                                    self.local_types.insert(name.clone(), class_name.clone());
+                                }
+                            }
+                        }
                         self.compile_expr(value)?;
                         if self.global_names.contains(name) {
                             let name_idx = self.intern_name(name);
@@ -2580,28 +2640,33 @@ impl Compiler {
             }
             Expr::Attribute { object, name } => {
                 if let Expr::Identifier(obj_name) = &**object {
-                    if let Some(sl) = self.self_local {
-                        if let Some(&local_idx) = self.local_map.get(obj_name.as_str()) {
-                            if local_idx == sl {
-                                self.emit(Opcode::LoadFast(local_idx), 0);
-                                // Try compile-time field offset resolution
-                                let idx = if let Some(ref class_name) = self.current_class {
-                                    if let Some(fields) = self.class_field_map.get(class_name) {
-                                        if let Some((_, offset)) = fields.iter().find(|(n, _)| n == name) {
-                                            self.add_constant(Value::Integer(*offset as i64))
-                                        } else {
-                                            self.add_constant(Value::String(name.clone()))
-                                        }
-                                    } else {
-                                        self.add_constant(Value::String(name.clone()))
-                                    }
+                    if let Some(&local_idx) = self.local_map.get(obj_name.as_str()) {
+                        self.emit(Opcode::LoadFast(local_idx), 0);
+                        let idx = if let Some(ref class_name) = self.current_class {
+                            if let Some(fields) = self.class_field_map.get(class_name) {
+                                if let Some((_, offset)) = fields.iter().find(|(n, _)| n == name) {
+                                    self.add_constant(Value::Integer(*offset as i64))
                                 } else {
                                     self.add_constant(Value::String(name.clone()))
-                                };
-                                self.emit(Opcode::GetInstanceField(idx), 0);
-                                return Ok(());
+                                }
+                            } else {
+                                self.add_constant(Value::String(name.clone()))
                             }
-                        }
+                        } else if let Some(inferred_class) = self.local_types.get(obj_name.as_str()) {
+                            if let Some(fields) = self.class_field_map.get(inferred_class) {
+                                if let Some((_, offset)) = fields.iter().find(|(n, _)| n == name) {
+                                    self.add_constant(Value::Integer(*offset as i64))
+                                } else {
+                                    self.add_constant(Value::String(name.clone()))
+                                }
+                            } else {
+                                self.add_constant(Value::String(name.clone()))
+                            }
+                        } else {
+                            self.add_constant(Value::String(name.clone()))
+                        };
+                        self.emit(Opcode::GetInstanceField(idx), 0);
+                        return Ok(());
                     }
                 }
                 self.compile_expr(object)?;
@@ -2691,18 +2756,15 @@ impl Compiler {
                 }
             }
             Expr::ListComp { expr, iter, target, condition } => {
-                // Create empty result list
                 let result_idx = self.get_or_create_local("__lc_result");
                 self.emit(Opcode::LoadNone, 0);
                 self.emit(Opcode::BuildList(0), 0);
                 self.emit(Opcode::StoreFast(result_idx), 0);
 
-                // Compile iterable
                 let iter_idx = self.get_or_create_local("__lc_iter");
                 self.compile_expr(iter)?;
                 self.emit(Opcode::StoreFast(iter_idx), 0);
 
-                // Get length
                 self.emit(Opcode::LoadFast(iter_idx), 0);
                 let attr_idx = self.add_constant(Value::String("طول".to_string()));
                 self.emit(Opcode::LoadConst(attr_idx), 0);
@@ -2710,63 +2772,52 @@ impl Compiler {
                 let len_idx = self.get_or_create_local("__lc_len");
                 self.emit(Opcode::StoreFast(len_idx), 0);
 
-                // Init index
                 let idx_idx = self.get_or_create_local("__lc_idx");
                 let zero_idx = self.add_constant(Value::Integer(0));
                 self.emit(Opcode::LoadConst(zero_idx), 0);
                 self.emit(Opcode::StoreFast(idx_idx), 0);
 
-                // Loop start
                 let loop_start = self.instructions.len();
                 self.emit(Opcode::LoadFast(idx_idx), 0);
                 self.emit(Opcode::LoadFast(len_idx), 0);
-                self.emit(Opcode::CompareLtIntInt, 0);
+                self.emit(Opcode::CompareLt, 0);
                 let jump_to_end = self.instructions.len();
                 self.emit(Opcode::PopJumpIfFalse(0), 0);
 
-                // Load item
                 self.emit(Opcode::LoadFast(iter_idx), 0);
                 self.emit(Opcode::LoadFast(idx_idx), 0);
                 self.emit(Opcode::SubscriptLocal(iter_idx, idx_idx), 0);
                 let target_idx = self.get_or_create_local(target);
                 self.emit(Opcode::StoreFast(target_idx), 0);
 
-                // if clause
                 if let Some(cond) = condition {
                     self.compile_expr(cond)?;
                     let jump_to_incr = self.instructions.len();
                     self.emit(Opcode::PopJumpIfFalse(0), 0);
 
-                    // Compile expression and append to result (O(1) amortized)
                     self.compile_expr(expr)?;
                     self.emit(Opcode::ListAppendLocal(result_idx), 0);
 
-                    // Increment
                     self.emit_with_operand(Opcode::IncrementInt(idx_idx), 1, 0);
                     self.emit(Opcode::JumpBackward(loop_start), 0);
 
-                    // Patch condition jump to increment
                     let incr_pos = self.instructions.len() - 2;
                     if let Some(offset) = self.instructions[jump_to_incr].opcode.as_jump_offset_mut() {
                         *offset = incr_pos - jump_to_incr;
                     }
                 } else {
-                    // Compile expression and append to result (O(1) amortized)
                     self.compile_expr(expr)?;
                     self.emit(Opcode::ListAppendLocal(result_idx), 0);
 
-                    // Increment
                     self.emit_with_operand(Opcode::IncrementInt(idx_idx), 1, 0);
                     self.emit(Opcode::JumpBackward(loop_start), 0);
                 }
 
-                // Patch end
                 let loop_end = self.instructions.len();
                 if let Some(offset) = self.instructions[jump_to_end].opcode.as_jump_offset_mut() {
                     *offset = loop_end - jump_to_end;
                 }
 
-                // Result is on the stack
                 self.emit(Opcode::LoadFast(result_idx), 0);
             }
             Expr::SetComp { expr, iter, target, condition } => {
