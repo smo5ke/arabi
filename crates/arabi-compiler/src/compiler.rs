@@ -1535,6 +1535,36 @@ impl Compiler {
             }
         }
 
+        // Pass 39: Fuse LoadFast(x) + LoadConst(str) + BinaryAdd + StoreFast(x) → InplaceAddStrConst(x, str_const_idx)
+        // This converts O(n²) string concat to O(n) in-place mutation
+        let len = self.instructions.len();
+        let mut i = 0;
+        let mut pass39_count = 0usize;
+        while i + 3 < len {
+            if let (Opcode::LoadFast(x), Opcode::LoadConst(cidx), Opcode::BinaryAdd, Opcode::StoreFast(y)) =
+                (&self.instructions[i].opcode, &self.instructions[i + 1].opcode, &self.instructions[i + 2].opcode, &self.instructions[i + 3].opcode)
+            {
+                if x == y {
+                    if matches!(&self.constants[*cidx], Value::String(_)) {
+                        let local_idx = *x;
+                        let const_idx = *cidx;
+                        self.instructions[i].opcode = Opcode::InplaceAddStrConst(local_idx);
+                        self.instructions[i].operand = const_idx;
+                        self.instructions[i + 1].opcode = Opcode::Nop;
+                        self.instructions[i + 2].opcode = Opcode::Nop;
+                        self.instructions[i + 3].opcode = Opcode::Nop;
+                        pass39_count += 1;
+                        i += 4;
+                        continue;
+                    }
+                }
+            }
+            i += 1;
+        }
+        if pass39_count > 0 {
+            eprintln!("[peephole] Pass 39: fused {} LoadFast+LoadConst(str)+BinaryAdd+StoreFast → InplaceAddStrConst", pass39_count);
+        }
+
         // Pass 22: Compact — remove all Nop instructions and adjust jump targets
         let old_len = self.instructions.len();
         if old_len == 0 { return; }

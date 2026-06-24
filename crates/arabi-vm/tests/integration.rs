@@ -2027,3 +2027,116 @@ fn test_161_dunder_bool() {
     assert_eq!(r.globals.get("ن1"), Some(&Value::Boolean(false)));
     assert_eq!(r.globals.get("ن2"), Some(&Value::Boolean(true)));
 }
+
+#[test]
+fn test_162_exception_from_function_caught_in_caller() {
+    // Test 1: Basic try/except (no function call) - should always work
+    let src1 = r#"
+مكشوف = خطا
+حاول:
+    ارم استثناء("محظور", "اختبار")
+خلل:
+    مكشوف = صح
+"#;
+    let r1 = run_arabi(src1).unwrap();
+    assert_eq!(r1.globals.get("مكشوف"), Some(&Value::Boolean(true)), "basic try/except failed");
+
+    // Test 2: Exception from function call
+    let src2 = r#"
+مكشوف = خطا
+دالة قد_تنفذ_محظور():
+    ارم استثناء("محظور", "هذه دالة محظورة")
+حاول:
+    قد_تنفذ_محظور()
+خلل:
+    مكشوف = صح
+"#;
+    let r2 = run_arabi(src2).unwrap();
+    assert_eq!(r2.globals.get("مكشوف"), Some(&Value::Boolean(true)), "exception from function should be caught");
+}
+
+#[test]
+fn test_163_named_exception_from_function_caught_by_bare_catch() {
+    let source = r#"
+دالة قد_يصيب_خطأ():
+    ارم استثناء("خطا", "حدث خطأ")
+
+تم_القبض = خطا
+حاول:
+    قد_يصيب_خطأ()
+خلل:
+    تم_القبض = صح
+"#;
+    let r = run_arabi(source).unwrap();
+    assert_eq!(r.globals.get("تم_القبض"), Some(&Value::Boolean(true)));
+}
+
+#[test]
+fn test_164_exception_from_nested_function_caught_in_caller() {
+    let source = r#"
+دالة قد_يصيب_خطأ():
+    دالة داخلي():
+        ارم استثناء("محظور", "خطأ عميق")
+    داخلي()
+
+نوع_مطابق = خطا
+حاول:
+    قد_يصيب_خطأ()
+خلل:
+    نوع_مطابق = صح
+"#;
+    let r = run_arabi(source).unwrap();
+    assert_eq!(r.globals.get("نوع_مطابق"), Some(&Value::Boolean(true)));
+}
+
+#[test]
+fn test_165_field_chaining_list_append() {
+    let source = r#"
+صنف شخص:
+    دالة __تهيئة__(هذا، اسم):
+        هذا.اسم = اسم
+        هذا.قائمة = []
+
+شخص1 = شخص("أحمد")
+شخص1.قائمة.اضف(1)
+شخص1.قائمة.اضف(2)
+شخص1.قائمة.اضف(3)
+اطبع(شخص1.قائمة)
+"#;
+    let r = run_arabi(source).unwrap();
+    let list = r.globals.get("شخص1").and_then(|v| match v {
+        Value::Instance(rc) => rc.get_field("قائمة"),
+        _ => None,
+    });
+    assert_eq!(list, Some(Value::List(SharedList::new(vec![Value::Integer(1), Value::Integer(2), Value::Integer(3)]))));
+}
+
+#[test]
+fn test_166_field_chaining_dict_methods() {
+    let source = r#"
+صنف حاوية:
+    دالة __تهيئة__(هذا):
+        هذا.بيانات = {}
+
+ح = حاوية()
+ح.بيانات["مفتاح"] = "قيمة"
+"#;
+    let r = run_arabi(source).unwrap();
+    assert_eq!(r.globals.get("ح").is_some(), true);
+}
+
+#[test]
+fn test_167_field_chaining_list_length() {
+    let source = r#"
+صنف شخص:
+    دالة __تهيئة__(هذا):
+        هذا.قائمة = []
+
+شخص1 = شخص()
+شخص1.قائمة.اضف(10)
+شخص1.قائمة.اضف(20)
+م = شخص1.قائمة.طول
+"#;
+    let r = run_arabi(source).unwrap();
+    assert_eq!(r.globals.get("م"), Some(&Value::Integer(2)));
+}

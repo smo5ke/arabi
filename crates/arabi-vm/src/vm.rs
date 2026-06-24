@@ -296,6 +296,15 @@ impl VM {
         }
     }
 
+    pub(crate) fn class_inherits_exception(&self, class: &ClassData, target: &str) -> bool {
+        if class.name.as_ref() == target { return true; }
+        for parent_name in &class.parents {
+            if parent_name == target { return true; }
+            if self.is_exception_child(parent_name, target) { return true; }
+        }
+        false
+    }
+
     pub fn push_frame(&mut self, arena_offset: usize, arena_len: usize, return_ip: usize) -> Result<(), RuntimeError> {
         if self.frames.len() >= self.frame_depth_limit {
             return Err(RuntimeError::new(
@@ -777,11 +786,16 @@ impl VM {
 
         // Macro for integer-specialized binary ops (used by Tier 3)
         macro_rules! int_int_binop {
-            ($op:tt, $fallback:ident) => {{
+            ($op:tt, $fallback:ident, $checked_fn:ident) => {{
                 let right = hot_pop!();
                 let left = hot_pop!();
                 match (left, right) {
-                    (Value::Integer(a), Value::Integer(b)) => hot_push!(Value::Integer(a $op b)),
+                    (Value::Integer(a), Value::Integer(b)) => {
+                        match a.$checked_fn(b) {
+                            Some(v) => hot_push!(Value::Integer(v)),
+                            None => hot_push!(Value::Float(a as f64 $op b as f64)),
+                        }
+                    }
                     (a, b) => { let r = self.$fallback(a, b); match r { Ok(v) => hot_push!(v), Err(e) => { runtime_error!(e.class_name(), e.to_string()); } } }
                 }
             }};
@@ -802,7 +816,7 @@ impl VM {
 
         // Macro for OP_ADD/SUBTRACT_LOCAL_IMM patterns
         macro_rules! local_imm_op {
-            ($a:expr, $imm:expr, $locals_len:expr, $locals_ptr:expr, $op:tt, $fallback:ident) => {{
+            ($a:expr, $imm:expr, $locals_len:expr, $locals_ptr:expr, $op:tt, $fallback:ident, $checked_fn:ident) => {{
                 if $a < $locals_len {
                     let val = unsafe {
                         let slot = &*($locals_ptr).add($a);
@@ -810,7 +824,12 @@ impl VM {
                             Value::Cell(cell) => {
                                 let borrowed = cell.borrow();
                                 match &*borrowed {
-                                    Value::Integer(n) => Value::Integer(n $op $imm),
+                                    Value::Integer(n) => {
+                                        match n.$checked_fn($imm) {
+                                            Some(v) => Value::Integer(v),
+                                            None => Value::Float(*n as f64 $op $imm as f64),
+                                        }
+                                    }
                                     Value::Float(f) => Value::Float(f $op $imm as f64),
                                     _ => {
                                         drop(borrowed);
@@ -823,7 +842,12 @@ impl VM {
                                     }
                                 }
                             }
-                            Value::Integer(n) => Value::Integer(n $op $imm),
+                            Value::Integer(n) => {
+                                match n.$checked_fn($imm) {
+                                    Some(v) => Value::Integer(v),
+                                    None => Value::Float(*n as f64 $op $imm as f64),
+                                }
+                            }
                             Value::Float(f) => Value::Float(f $op $imm as f64),
                             other => {
                                 let left = other.clone();
@@ -1112,7 +1136,10 @@ impl VM {
                     let left = hot_pop!();
                     match (&left, &right) {
                         (Value::Integer(a_val), Value::Integer(b_val)) => {
-                            hot_push!(Value::Integer(a_val + b_val))
+                            match a_val.checked_add(*b_val) {
+                                Some(sum) => hot_push!(Value::Integer(sum)),
+                                None => hot_push!(Value::Float(*a_val as f64 + *b_val as f64)),
+                            }
                         }
                         (Value::Float(a), Value::Float(b)) => hot_push!(Value::Float(a + b)),
                         (Value::Integer(a), Value::Float(b)) => hot_push!(Value::Float(*a as f64 + b)),
@@ -1160,7 +1187,12 @@ impl VM {
                     let right = hot_pop!();
                     let left = hot_pop!();
                     match (&left, &right) {
-                        (Value::Integer(a), Value::Integer(b)) => hot_push!(Value::Integer(a - b)),
+                        (Value::Integer(a), Value::Integer(b)) => {
+                            match a.checked_sub(*b) {
+                                Some(diff) => hot_push!(Value::Integer(diff)),
+                                None => hot_push!(Value::Float(*a as f64 - *b as f64)),
+                            }
+                        }
                         (Value::Float(a), Value::Float(b)) => hot_push!(Value::Float(a - b)),
                         (Value::Integer(a), Value::Float(b)) => hot_push!(Value::Float(*a as f64 - b)),
                         (Value::Float(a), Value::Integer(b)) => hot_push!(Value::Float(a - *b as f64)),
@@ -1190,7 +1222,12 @@ impl VM {
                     let right = hot_pop!();
                     let left = hot_pop!();
                     match (&left, &right) {
-                        (Value::Integer(a), Value::Integer(b)) => hot_push!(Value::Integer(a * b)),
+                        (Value::Integer(a), Value::Integer(b)) => {
+                            match a.checked_mul(*b) {
+                                Some(prod) => hot_push!(Value::Integer(prod)),
+                                None => hot_push!(Value::Float(*a as f64 * *b as f64)),
+                            }
+                        }
                         (Value::Float(a), Value::Float(b)) => hot_push!(Value::Float(a * b)),
                         (Value::Integer(a), Value::Float(b)) => hot_push!(Value::Float(*a as f64 * b)),
                         (Value::Float(a), Value::Integer(b)) => hot_push!(Value::Float(a * *b as f64)),
@@ -1421,8 +1458,8 @@ impl VM {
                 }
 
                 // Tier 3 specialized integer opcodes — skip type checks
-                OP_BINARY_ADD_INT_INT => { int_int_binop!(+, add); }
-                OP_BINARY_SUB_INT_INT => { int_int_binop!(-, sub); }
+                OP_BINARY_ADD_INT_INT => { int_int_binop!(+, add, checked_add); }
+                OP_BINARY_SUB_INT_INT => { int_int_binop!(-, sub, checked_sub); }
 
                 // Fused: locals[list][locals[idx]] - locals[sub_local]
                 OP_SUBSCRIPT_LOCAL_BINARY_SUB => {
@@ -1480,7 +1517,7 @@ impl VM {
                         }
                     }
                 }
-                OP_BINARY_MUL_INT_INT => { int_int_binop!(*, mul); }
+                OP_BINARY_MUL_INT_INT => { int_int_binop!(*, mul, checked_mul); }
                 OP_BINARY_DIV_INT_INT => { int_int_divop!(div); }
                 OP_BINARY_FLOOR_DIV_INT_INT => {
                     let right = hot_pop!();
@@ -1507,8 +1544,8 @@ impl VM {
                 OP_COMPARE_GE_INT_INT => { int_compare_op!(|l: &Value, r: &Value| match (l, r) { (Value::Integer(a), Value::Integer(b)) => a >= b, _ => self.greater_than(l, r) || self.equals(l, r) }); }
                 OP_COMPARE_NOT_EQ_INT_INT => { int_compare_op!(|l: &Value, r: &Value| match (l, r) { (Value::Integer(a), Value::Integer(b)) => a != b, (Value::Float(a), Value::Float(b)) => a != b, _ => !self.equals(l, r) }); }
 
-                OP_SUBTRACT_LOCAL_IMM => { local_imm_op!(a, imm, locals_len, locals_ptr, -, sub); }
-                OP_ADD_LOCAL_IMM => { local_imm_op!(a, imm, locals_len, locals_ptr, +, add); }
+                OP_SUBTRACT_LOCAL_IMM => { local_imm_op!(a, imm, locals_len, locals_ptr, -, sub, checked_sub); }
+                OP_ADD_LOCAL_IMM => { local_imm_op!(a, imm, locals_len, locals_ptr, +, add, checked_add); }
                 OP_POP_JUMP_IF_LE_LOCAL_IMM => {
                     if a < locals_len {
                         let should_jump = unsafe {
@@ -4255,7 +4292,7 @@ if let Value::Instance(rc) = &val {
                                         let pi2 = packed[ip];
                                         let op2 = pi2 as u8;
                                         let local_a2 = ((pi2 >> 8) & 0xFF) as usize;
-                                        if (op2 == OP_LOAD_FAST && local_a2 > 0) || op2 == OP_LOAD_NONE || op2 == OP_LOAD_TRUE || op2 == OP_LOAD_FALSE || op2 == OP_LOAD_CONST {
+                                        if (op2 == OP_LOAD_FAST && local_a2 > 0) || op2 == OP_LOAD_NONE || op2 == OP_LOAD_TRUE || op2 == OP_LOAD_FALSE || op2 == OP_LOAD_CONST || op2 == OP_BUILD_LIST || op2 == OP_BUILD_DICT || op2 == OP_BUILD_TUPLE || op2 == OP_BUILD_SET || op2 == OP_UNARY_NEGATIVE || op2 == OP_UNARY_BIT_NOT {
                                             ip += 1;
                                             if ip >= packed.len() { ok = false; break; }
                                             let pi3 = packed[ip];
@@ -5697,8 +5734,13 @@ if let Value::Instance(rc) = &val {
                     let exc = match &exc_val {
                         Value::Exception(_) => exc_val,
                         Value::Instance(rc) => {
-                            let is_exc = self.is_exception_child(rc.class.name.as_ref(), "استثناء");
+                            let is_exc = self.is_exception_child(rc.class.name.as_ref(), "استثناء")
+                                || self.class_inherits_exception(&rc.class, "استثناء");
                             if is_exc {
+                                // Register in exception hierarchy if not already present
+                                if !self.exception_hierarchy.contains_key(rc.class.name.as_ref()) {
+                                    self.exception_hierarchy.insert(rc.class.name.to_string(), rc.class.parents.clone());
+                                }
                                 let exc = ExceptionData {
                                     class_name: rc.class.name.to_string(),
                                     message: exc_val.to_string_value(),
@@ -5733,16 +5775,36 @@ if let Value::Instance(rc) = &val {
                     };
                     self.current_exception = Some(exc.clone());
 
-                    // Unwind to handler (only in current frame)
-                    let frame_depth = self.frames.len();
-                    let saved_len = if frame_depth > 0 { self.frames[frame_depth - 1].saved_handler_len } else { 0 };
-                    if self.exception_handlers.len() > saved_len {
-                        if let Some(handler_ip) = self.exception_handlers.last().copied() {
-                            self.exception_handlers.pop();
-                            hot_push!(exc);
-                            ip = handler_ip;
-                            continue;
+                    // Unwind to handler — pop frames until we find one with a handler
+                    let mut found_handler = false;
+                    loop {
+                        let frame_depth = self.frames.len();
+                        let saved_len = if frame_depth > 0 { self.frames[frame_depth - 1].saved_handler_len } else { 0 };
+                        if self.exception_handlers.len() > saved_len {
+                            if let Some(handler_ip) = self.exception_handlers.last().copied() {
+                                self.exception_handlers.pop();
+                                hot_push!(exc.clone());
+                                ip = handler_ip;
+                                found_handler = true;
+                                break;
+                            }
                         }
+                        // No handler in current frame — pop frames to check parents
+                        if self.frames.len() > 1 {
+                            let popped = self.frames.pop().expect("frame stack underflow");
+                            self.stack.truncate(popped.saved_stack_len);
+                            self.locals_arena.truncate(popped.arena_offset);
+                            // DON'T truncate exception_handlers — they belong to parent frames
+                            if let Some(frame) = self.frames.last() {
+                                locals_ptr = unsafe { self.locals_arena.as_mut_ptr().add(frame.arena_offset) };
+                                locals_len = frame.arena_len;
+                            }
+                        } else {
+                            break;
+                        }
+                    }
+                    if found_handler {
+                        continue;
                     }
                     return Err(RuntimeError::new_typed(exc.type_name(), format!("استثناء غير مُعالَج: {}", exc.to_string_value())).with_line(if ip > 0 { module.lines.get(ip - 1).copied().unwrap_or(0) as usize } else { 0 }));
                 }
